@@ -1,0 +1,15 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Contracts\NxOpen.Foundation.Contracts.csproj" />
+    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Core\NxOpen.Foundation.Core.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFrameworks>net48;net8.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+  </PropertyGroup>
+
+</Project>

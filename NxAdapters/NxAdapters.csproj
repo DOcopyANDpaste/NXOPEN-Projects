@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    NOT added to NxMaterialAssignment.sln yet — this project (which now also holds the Material
+    Assignment dialog/presenter and its entry point, per the "one project, not three" decision) references
+    real NXOpen/UFSession assemblies that only resolve on a machine with NX installed (UGII_BASE_DIR set).
+    Add it to the solution once building on such a machine; until then `dotnet build`/`dotnet test` on the
+    .sln intentionally do not touch this project.
+  -->
+
+  <ItemGroup>
+    <!--
+      Core reference: previously deliberately avoided (see CoatingDisplayMaterialAssigner's doc
+      comment on keeping shared keys as out-of-band literals instead), but the dialog's composition root
+      and presenter need Core's planner/finalizer/rules/grouper types directly.
+    -->
+    <ProjectReference Include="..\Core\Core.csproj" />
+    <!--
+      Foundation references: Contracts/Core come in transitively via Core.csproj's own references, but
+      are listed explicitly here too since this project uses their types directly (MaterialLibraryParser,
+      CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository, etc.). NxAdapters is the one
+      foundation project that must be referenced directly — it has no other path into this project.
+    -->
+    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Contracts\NxOpen.Foundation.Contracts.csproj" />
+    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Core\NxOpen.Foundation.Core.csproj" />
+    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.NxAdapters\NxOpen.Foundation.NxAdapters.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+  </PropertyGroup>
+
+  <!--
+    Per Skills/common.md non-negotiable #4: no hardcoded install paths, reference via UGII_BASE_DIR.
+    Managed-assembly folder name/layout ("managed\NXOpen.dll", "managed\NXOpen.UF.dll") is the common
+    convention for recent NX versions but is NOT verified against a real install — confirm and correct
+    against your installed NX version before this will resolve.
+  -->
+  <ItemGroup>
+    <Reference Include="NXOpen">
+      <HintPath>$(UGII_BASE_DIR)\managed\NXOpen.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="NXOpen.UF">
+      <HintPath>$(UGII_BASE_DIR)\managed\NXOpen.UF.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!--
+    VERIFY: NXOpen.BlockStyler types (used by Ui/BlockAccessor.cs, Ui/MaterialAssignmentDialog.cs) are
+    assumed to resolve from the NXOpen reference above. If the installed NX version ships Block UI Styler
+    types in a separate managed assembly instead, add a Reference for it here the same way, via
+    $(UGII_BASE_DIR)\managed\.
+  -->
+
+</Project>
