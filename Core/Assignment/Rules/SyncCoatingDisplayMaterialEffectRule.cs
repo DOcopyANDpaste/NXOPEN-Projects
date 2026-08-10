@@ -7,6 +7,9 @@ namespace Core.Assignment.Rules;
 /// specific gate rule executed, since the pipeline is meant to be composed freely.</summary>
 public sealed class SyncCoatingDisplayMaterialEffectRule : IPostAssignmentEffectRule
 {
+    /// <summary>Data key for the display material name — a <c>string</c>.</summary>
+    public const string DisplayMaterialNameDataKey = "DisplayMaterialName";
+
     /// <summary>Data key for the RGB triplet — a <c>double[3]</c> of normalized 0-1 components, in
     /// [R, G, B] order. Callers must know this shape; <see cref="SideEffectInstruction.Data"/> is a
     /// plain object bag, not self-describing.</summary>
@@ -32,7 +35,7 @@ public sealed class SyncCoatingDisplayMaterialEffectRule : IPostAssignmentEffect
         double[] rgb = [Math.Round(r, 6), Math.Round(g, 6), Math.Round(b, 6)];
         var data = new Dictionary<string, object>
         {
-            ["DisplayMaterialName"] = displayMaterialName,
+            [DisplayMaterialNameDataKey] = displayMaterialName,
             [RgbDataKey] = rgb,
         };
 

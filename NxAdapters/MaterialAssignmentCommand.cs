@@ -24,8 +24,8 @@ public static class MaterialAssignmentCommand
         }
 
         var bodyResolver = new BodyResolver(context);
-        var displayMaterialAssigner = new CoatingDisplayMaterialAssigner(context);
-        var partMaterialService = new PartMaterialService(context, bodyResolver, displayMaterialAssigner);
+        var displayMaterialHelper = new DisplayMaterialHelper(context);
+        var partMaterialService = new PartMaterialService(context, bodyResolver, displayMaterialHelper);
 
         var libraryRepository = new FileSystemMaterialLibraryRepository(onWarning: context.Log.Warn);
         var libraryParser = new MaterialLibraryParser();
@@ -39,19 +39,19 @@ public static class MaterialAssignmentCommand
             new ValidateCoatingDisplayMaterialRule(),
         });
 
+        // SyncPhysicalPropertiesEffectRule is intentionally NOT registered: nothing executes
+        // SYNC_PHYSICAL_PROPERTY instructions, so wiring it would only generate work ApplyPlan discards.
+        // The rule and its tests are kept — add it back here alongside a matching executor in
+        // PartMaterialService when physical property sync is wanted.
         var finalizer = new AssignmentPlanFinalizer(new IPostAssignmentEffectRule[]
         {
-            new SyncPhysicalPropertiesEffectRule(),
-            // Still wired even though PartMaterialService has no executor for SYNC_PHYSICAL_PROPERTY yet
-            // (deliberately deferred this round) — ApplyPlan logs and skips that instruction type rather
-            // than failing, so this stays safe to include.
             new SyncCoatingDisplayMaterialEffectRule(),
         });
 
         // VERIFY: real Styler-generated dialog construction/launch — MaterialAssignmentDialog is itself a
         // conceptual placeholder (see its own doc comment) until the real .dlx exists.
         var dialog = new MaterialAssignmentDialog();
-        var blocks = new BlockAccessor(dialog.TheDialog);
+        var blocks = new BlockAccessor(dialog.TheDialog, context.Log.Warn);
         var presenter = new MaterialAssignmentDialogPresenter(
             context, blocks, partMaterialService, libraryRepository, libraryLoader, tabGrouper, planner, finalizer);
 

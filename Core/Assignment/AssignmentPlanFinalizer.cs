@@ -37,9 +37,18 @@ public sealed class AssignmentPlanFinalizer : IAssignmentPlanFinalizer
                 continue;
             }
 
+            // A plan evaluated against a different input than the one being finalized (e.g. the part was
+            // rescanned in between and a body disappeared) would otherwise throw here mid-loop, losing
+            // the assignments already accumulated. Skipping keeps partial-apply semantics intact.
+            if (!bodiesById.TryGetValue(evaluation.BodyId, out var targetBody))
+            {
+                skippedBlocked.Add(evaluation.BodyId);
+                continue;
+            }
+
             input.CurrentAssignments.TryGetValue(evaluation.BodyId, out var currentAssignment);
             var context = new MaterialAssignmentRuleContext(
-                input.RequestedMaterial, bodiesById[evaluation.BodyId], currentAssignment, input.TargetBodies);
+                input.RequestedMaterial, targetBody, currentAssignment, input.TargetBodies);
 
             var effects = _effectRules.SelectMany(rule => rule.GenerateEffects(context)).ToList();
             assignments.Add(new ExecutableAssignment(evaluation.BodyId, plan.RequestedMaterialId, effects));

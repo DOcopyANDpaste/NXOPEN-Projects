@@ -1,0 +1,14 @@
+## Build output
+[Bb]in/
+[Oo]bj/
+
+## Visual Studio / Rider / VS Code
+.vs/
+.idea/
+*.user
+*.suo
+
+## Test / coverage output
+[Tt]est[Rr]esults/
+*.coverage
+coverage.*.xml

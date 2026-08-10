@@ -5,13 +5,34 @@ namespace NxAdapters.Ui;
 /// <summary>
 /// GENERATED (CONCEPTUAL PLACEHOLDER) — stands in for what Block UI Styler will actually emit once the
 /// real <c>.dlx</c> exists. It cannot be hand-authored for real: the Styler tool requires an NX
-/// installation, which this session does not have (see the plan's §2/§4 dynamic-tab/tile spike). Do not
-/// treat this as the real generated class — actual Styler output includes dialog lifecycle/plumbing this
-/// file does not attempt to reproduce faithfully (block declarations, Dispose, real Show() semantics).
+/// installation, which this session does not have. Do not treat this as the real generated class —
+/// actual Styler output includes dialog lifecycle/plumbing this file does not attempt to reproduce
+/// (block declarations, Dispose, real Show() semantics).
 ///
-/// What IS real and must survive regeneration: the five callback delegations below, banner-marked per
-/// Skills/with-block-ui.md §1. Nothing else belongs in the generated file — all logic lives in
-/// <see cref="MaterialAssignmentDialogPresenter"/>.</summary>
+/// TO MAKE THIS REAL: lay the dialog out in Block UI Styler with the blocks below, naming each one
+/// exactly as its <see cref="BlockAccessor"/> constant, then let the Styler regenerate this file and
+/// re-add the banner-marked delegations at the bottom. Nothing else belongs here — all logic lives in
+/// <see cref="MaterialAssignmentDialogPresenter"/>, per Skills/with-block-ui.md §1.
+///
+/// <list type="table">
+/// <item><term>libraryDropdown</term><description>enum/combo — material libraries found on disk</description></item>
+/// <item><term>categoryDropdown</term><description>enum/combo — categories within the chosen library</description></item>
+/// <item><term>materialList</term><description>single-select list — materials in the chosen category</description></item>
+/// <item><term>materialPropertyPanel</term><description>read-only rows — selected material's properties</description></item>
+/// <item><term>materialUsageTable</term><description>2-column table — material name, body count</description></item>
+/// <item><term>bodyKindFilter</term><description>enum/combo — All / Solid / Sheet / Unknown</description></item>
+/// <item><term>bodyDrilldownList</term><description>multi-select list — bodies under the selected material</description></item>
+/// <item><term>planSummary</term><description>read-only rows — blocking/confirmation/warning messages</description></item>
+/// <item><term>selectAllButton</term><description>button — select every listed body</description></item>
+/// <item><term>selectUnassignedButton</term><description>button — select solids with no material</description></item>
+/// <item><term>removeButton</term><description>button — clear material from selected bodies</description></item>
+/// <item><term>refreshButton</term><description>button — re-query material state from the part</description></item>
+/// <item><term>materialTabs</term><description>DEFERRED — the tabbed tile grid; see BlockAccessor.PopulateMaterialTabs</description></item>
+/// </list>
+///
+/// Buttons need no callbacks of their own: Block UI Styler routes a button press through
+/// <see cref="update_cb"/> like any other block change, and the presenter dispatches on block ID.
+/// </summary>
 public sealed class MaterialAssignmentDialog
 {
     // VERIFY: placeholder plumbing — the real Styler-generated class provides its own BlockDialog-backed

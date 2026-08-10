@@ -43,6 +43,22 @@ public class AssignmentPlanFinalizerTests
     }
 
     [Fact]
+    public void Finalize_SkipsBodiesMissingFromTheInputInsteadOfThrowing()
+    {
+        // The part can be rescanned between planning and finalizing, dropping a body the plan still
+        // names. That must not take down the bodies alongside it.
+        var plan = MakePlan(Allowed("present"), Allowed("vanished"));
+        var input = new MaterialAssignmentPlanningInput(
+            MakeMaterial(), new[] { MakeBody("present") }, new Dictionary<BodyId, BodyMaterialAssignment>());
+        var finalizer = new AssignmentPlanFinalizer(Array.Empty<IPostAssignmentEffectRule>());
+
+        var executablePlan = finalizer.Finalize(plan, input, new HashSet<BodyId>());
+
+        Assert.Equal(new[] { "present" }, executablePlan.Assignments.Select(a => a.BodyId.Value));
+        Assert.Equal(new[] { "vanished" }, executablePlan.SkippedBlocked.Select(b => b.Value));
+    }
+
+    [Fact]
     public void Finalize_PreservesPlanIdOnTheExecutablePlan()
     {
         var plan = MakePlan(Allowed("b1"));

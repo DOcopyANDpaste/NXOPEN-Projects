@@ -1,19 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    NOT added to NxMaterialAssignment.sln yet — this project (which now also holds the Material
-    Assignment dialog/presenter and its entry point, per the "one project, not three" decision) references
-    real NXOpen/UFSession assemblies that only resolve on a machine with NX installed (UGII_BASE_DIR set).
-    Add it to the solution once building on such a machine; until then `dotnet build`/`dotnet test` on the
-    .sln intentionally do not touch this project.
+    In NxMaterialAssignment.sln so it loads in the IDE and gets IntelliSense/analyzer feedback, but with
+    no Build.0 entry in any configuration — it references real NXOpen/UFSession assemblies that only
+    resolve where NX is installed (UGII_BASE_DIR set), so building it by default would break
+    `dotnet build`/`dotnet test` everywhere else. Build it explicitly on an NX machine:
+    `dotnet build NxAdapters\NxAdapters.csproj`.
   -->
 
+  <Target Name="RequireUgiiBaseDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(UGII_BASE_DIR)' == ''"
+           Text="UGII_BASE_DIR is not set. This project references the NXOpen managed assemblies and can only be built on a machine with NX installed." />
+  </Target>
+
   <ItemGroup>
-    <!--
-      Core reference: previously deliberately avoided (see CoatingDisplayMaterialAssigner's doc
-      comment on keeping shared keys as out-of-band literals instead), but the dialog's composition root
-      and presenter need Core's planner/finalizer/rules/grouper types directly.
-    -->
+    <!-- The dialog's composition root and presenter use Core's planner/finalizer/rules/grouper types,
+         and the shared side-effect Data keys, directly. -->
     <ProjectReference Include="..\Core\Core.csproj" />
     <!--
       Foundation references: Contracts/Core come in transitively via Core.csproj's own references, but

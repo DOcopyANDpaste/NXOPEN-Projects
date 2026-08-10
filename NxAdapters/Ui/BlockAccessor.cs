@@ -2,7 +2,6 @@ using Core.Assignment;
 using Core.Bodies;
 using Core.Common;
 using Core.MaterialLibrary;
-using NXOpen;
 using NXOpen.BlockStyler;
 using NxOpen.Foundation.Contracts.Common;
 using NxOpen.Foundation.Contracts.Materials;
@@ -16,28 +15,44 @@ namespace NxAdapters.Ui;
 /// in this session), so these will need to match whatever the Styler tool actually names each block once
 /// the dialog is laid out.
 ///
-/// The material-tab tile grid (<see cref="PopulateMaterialTabs"/>) is the one section left intentionally
-/// thin — dynamically creating a variable number of tab pages and a variable number of tiles per tab is
-/// the single biggest open risk in this design (Block UI Styler layouts are normally a fixed, designer-
-/// placed set of blocks). See the plan's §2 risk callout: this needs a spike on an NX-installed machine
-/// to pick a real approach (true dynamic block instancing vs. a fixed hidden-block template vs. hosting a
-/// native .NET control) before this method's body can be finalized.</summary>
+/// Two conventions run through this class. First, every "get selection" method reads only an index (or
+/// index array) from the block and maps it back through a <c>LastPopulated*</c> list, so no domain value
+/// is ever reconstructed by parsing block text. Second, populating a list clears its selection, so a
+/// stale index can never resolve against freshly-swapped contents.
+///
+/// The material browser is currently a category dropdown + flat material list.
+/// <see cref="PopulateMaterialTabs"/> is the seam for the richer tabbed tile grid, which needs an
+/// NX-install spike first — see its doc comment.</summary>
 public sealed class BlockAccessor
 {
     // VERIFY: placeholder string IDs — must match the real .dlx once it exists. Internal (not private) so
     // MaterialAssignmentDialogPresenter.OnUpdate can switch on which block changed without duplicating
     // these literals — the single source of truth for block IDs stays this class, per with-block-ui.md §3.
     internal const string LibraryDropdownId = "libraryDropdown";
+    internal const string CategoryDropdownId = "categoryDropdown";
+    internal const string MaterialListId = "materialList";
     internal const string MaterialTabControlId = "materialTabs";
     internal const string MaterialPropertyPanelId = "materialPropertyPanel";
     internal const string MaterialUsageTableId = "materialUsageTable";
     internal const string BodyDrilldownListId = "bodyDrilldownList";
     internal const string BodyKindFilterId = "bodyKindFilter";
     internal const string PlanSummaryId = "planSummary";
+    internal const string SelectAllButtonId = "selectAllButton";
+    internal const string SelectUnassignedButtonId = "selectUnassignedButton";
+    internal const string RemoveButtonId = "removeButton";
+    internal const string RefreshButtonId = "refreshButton";
 
     private readonly BlockDialog _dialog;
+    private readonly Action<string>? _logWarning;
 
-    public BlockAccessor(BlockDialog dialog) => _dialog = dialog;
+    /// <param name="logWarning">Warning sink — takes a plain delegate rather than a concrete NX logger
+    /// so this class stays independent of the session context, matching the same seam
+    /// <c>FileSystemMaterialLibraryRepository</c> uses. Callers typically pass <c>context.Log.Warn</c>.</param>
+    public BlockAccessor(BlockDialog dialog, Action<string>? logWarning = null)
+    {
+        _dialog = dialog;
+        _logWarning = logWarning;
+    }
 
     // ---- Library dropdown ----
 
@@ -48,29 +63,77 @@ public sealed class BlockAccessor
         // Skills/with-block-ui.md §3.
         var properties = _dialog.GetBlock(LibraryDropdownId).GetProperties();
         properties.SetStringArray("ListItems", libraries.Select(l => l.DisplayName).ToArray());
+        LastPopulatedLibraries = libraries;
     }
 
+    private IReadOnlyList<MaterialLibraryReference>? LastPopulatedLibraries { get; set; }
+
+    /// <summary>Maps the selected row back to the library it was populated from. Deliberately not built
+    /// by wrapping the block's selected text in a <see cref="MaterialLibraryId"/> — display name and id
+    /// are separate fields, and only happen to coincide for the filesystem repository.</summary>
     public MaterialLibraryId? GetSelectedLibraryId()
     {
+        if (LastPopulatedLibraries is null)
+            return null;
+
         var properties = _dialog.GetBlock(LibraryDropdownId).GetProperties();
-        var selected = properties.GetString("SelectedValue");
-        return string.IsNullOrEmpty(selected) ? null : new MaterialLibraryId(selected);
+        var index = properties.GetInt("SelectedIndex");
+        return index >= 0 && index < LastPopulatedLibraries.Count
+            ? LastPopulatedLibraries[index].Id
+            : null;
     }
 
-    // ---- Material tab control (tiles) ----
+    // ---- Material browser: category dropdown + material list ----
 
-    /// <summary>Dynamically (re)builds one tab page per <see cref="MaterialTab.Category"/> and, within
-    /// each tab, one thumbnail+name tile per <see cref="Material"/> — see the risk callout on this class.
-    /// NOT IMPLEMENTED pending the dynamic-population spike; left as a clear seam (correct signature,
-    /// called from the right place in the presenter) rather than a fabricated guess at an API surface
-    /// this uncertain.</summary>
+    public void PopulateCategoryDropdown(IReadOnlyList<MaterialTab> tabs)
+    {
+        var properties = _dialog.GetBlock(CategoryDropdownId).GetProperties();
+        properties.SetStringArray("ListItems", tabs.Select(t => t.Category.DisplayName).ToArray());
+        properties.SetInt("SelectedIndex", tabs.Count > 0 ? 0 : -1);
+    }
+
+    public int GetSelectedCategoryIndex()
+    {
+        var properties = _dialog.GetBlock(CategoryDropdownId).GetProperties();
+        return properties.GetInt("SelectedIndex");
+    }
+
+    public void PopulateMaterialList(IReadOnlyList<Material> materials)
+    {
+        var properties = _dialog.GetBlock(MaterialListId).GetProperties();
+        properties.SetStringArray("ListItems", materials.Select(m => m.Name).ToArray());
+        properties.SetInt("SelectedIndex", -1);
+        LastPopulatedMaterials = materials;
+    }
+
+    private IReadOnlyList<Material>? LastPopulatedMaterials { get; set; }
+
+    public MaterialId? GetSelectedMaterialId()
+    {
+        if (LastPopulatedMaterials is null)
+            return null;
+
+        var properties = _dialog.GetBlock(MaterialListId).GetProperties();
+        var index = properties.GetInt("SelectedIndex");
+        return index >= 0 && index < LastPopulatedMaterials.Count
+            ? LastPopulatedMaterials[index].Id
+            : null;
+    }
+
+    /// <summary>Seam for the richer view: one tab page per <see cref="MaterialTab.Category"/> and, within
+    /// each tab, one thumbnail+name tile per <see cref="Material"/>. Dynamically creating a variable
+    /// number of tab pages and tiles is the single biggest open risk in this design (Block UI Styler
+    /// layouts are normally a fixed, designer-placed set of blocks), so it needs a spike on an
+    /// NX-installed machine to pick an approach — true dynamic block instancing vs. a fixed hidden-block
+    /// template vs. hosting a native .NET control.
+    ///
+    /// A no-op until then, not a throw: the category dropdown and material list above already give the
+    /// user a working picker off the same <see cref="MaterialTab"/> data, so failing here would take down
+    /// a dialog that is otherwise fully functional.</summary>
     public void PopulateMaterialTabs(IReadOnlyList<MaterialTab> tabs) =>
-        throw new NotImplementedException(
-            "VERIFY/SPIKE: resolve the dynamic tab/tile population approach on an NX-installed machine " +
-            "(see the plan's §2 risk callout) before implementing this method.");
-
-    public MaterialId? GetSelectedMaterialId() =>
-        throw new NotImplementedException("Depends on PopulateMaterialTabs' approach — see spike note above.");
+        _logWarning?.Invoke(
+            $"Tabbed material tile grid not implemented (pending NX-install spike) — {tabs.Count} " +
+            "category tab(s) not rendered; using the category dropdown and material list instead.");
 
     public void ShowMaterialProperties(Material material)
     {
@@ -80,17 +143,6 @@ public sealed class BlockAccessor
             .Select(p => $"{p.Name}: {p.AsString()}{(string.IsNullOrEmpty(p.Unit) ? "" : $" {p.Unit}")}")
             .ToArray();
         properties.SetStringArray("Rows", rows);
-    }
-
-    private static string? TryGetThumbnailPath(Material material)
-    {
-        // VERIFY: candidate PropertyId/Name keys — the exact key NX's shipped MatML libraries use for a
-        // material's thumbnail/photo reference is unconfirmed; no real library XML sample was available.
-        string[] candidateKeys = { "Image", "Photo", "Thumbnail" };
-        return material.Properties
-            .FirstOrDefault(p => candidateKeys.Any(key => string.Equals(p.Name, key, StringComparison.OrdinalIgnoreCase))
-                               || candidateKeys.Any(key => string.Equals(p.PropertyId, key, StringComparison.OrdinalIgnoreCase)))
-            ?.AsString();
     }
 
     // ---- Material usage table + body drill-down ----
@@ -120,7 +172,12 @@ public sealed class BlockAccessor
     public void PopulateBodyDrilldownList(IReadOnlyList<BodyInfo> bodies)
     {
         var properties = _dialog.GetBlock(BodyDrilldownListId).GetProperties();
-        properties.SetStringArray("ListItems", bodies.Select(b => b.Name).ToArray());
+        properties.SetStringArray("ListItems", bodies.Select(b => $"{b.Name} [{b.Kind}] ({b.Id})").ToArray());
+
+        // Clear selection before swapping the backing list: indices left over from the previously shown
+        // set would otherwise resolve against the new one, letting Apply/Remove hit bodies the user never
+        // picked — possibly under a different material row entirely.
+        properties.SetIntArray("SelectedIndices", Array.Empty<int>());
         LastPopulatedDrilldownBodies = bodies;
     }
 
@@ -169,8 +226,7 @@ public sealed class BlockAccessor
 
     public void ShowPlanSummary(AssignmentPlan plan)
     {
-        // VERIFY: exact read-only text/list block API for blocking/confirmation/warning messages, plus
-        // whatever per-body checkbox control backs GetConfirmedBodyIds() below.
+        // VERIFY: exact read-only text/list block API for blocking/confirmation/warning messages.
         var properties = _dialog.GetBlock(PlanSummaryId).GetProperties();
         var lines = plan.BodyEvaluations
             .SelectMany(evaluation => evaluation.RuleOutcomes
@@ -183,12 +239,30 @@ public sealed class BlockAccessor
 
     private AssignmentPlan? LastPlan { get; set; }
 
+    /// <summary>Asks the user to confirm the bodies whose rules returned RequireConfirmation — chiefly
+    /// reassignment over an existing material, and coating display-material mismatches.
+    ///
+    /// All-or-nothing, driven by the plan last passed to <see cref="ShowPlanSummary"/>, because Block UI
+    /// Styler has no per-row checkbox control to hang a per-body answer off. The finalizer's per-body
+    /// partial-apply handling is untouched, so a real per-body control can replace this later without
+    /// changing anything downstream. Returning an empty set on decline skips those bodies; the rest of
+    /// the plan still applies.</summary>
     public HashSet<BodyId> GetConfirmedBodyIds()
     {
-        // VERIFY: exact per-body confirmation-checkbox read. Placeholder returns an empty set (nothing
-        // confirmed) until the real checkbox block exists — safe default, since an unconfirmed body is
-        // simply skipped (partial-apply), never silently applied.
-        return new HashSet<BodyId>();
+        var needingConfirmation = LastPlan?.BodyEvaluations.Where(e => e.RequiresConfirmation).ToList();
+        if (needingConfirmation is null || needingConfirmation.Count == 0)
+            return new HashSet<BodyId>();
+
+        var details = needingConfirmation.SelectMany(evaluation => evaluation.ConfirmationOutcomes
+            .Select(outcome => $"  [{evaluation.BodyId}] {outcome.Message}"));
+        var message =
+            $"{needingConfirmation.Count} body(ies) need confirmation:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, details) +
+            $"{Environment.NewLine}{Environment.NewLine}Apply to all of them?";
+
+        return Confirm(message)
+            ? needingConfirmation.Select(e => e.BodyId).ToHashSet()
+            : new HashSet<BodyId>();
     }
 
     // ---- Generic dialogs ----
@@ -198,8 +272,8 @@ public sealed class BlockAccessor
 
     public bool Confirm(string message) => NxMessageBoxHelper.Confirm(message);
 
-    public void ShowResult(OperationResult result) =>
-        NxMessageBoxHelper.ShowResult(result, "Material assignment applied.");
+    public void ShowResult(OperationResult result, string successMessage) =>
+        NxMessageBoxHelper.ShowResult(result, successMessage);
 
     public void ShowError(string message) => NxMessageBoxHelper.ShowError(message);
 }

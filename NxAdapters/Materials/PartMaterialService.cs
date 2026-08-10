@@ -11,45 +11,34 @@ using NxOpen.Foundation.NxAdapters;
 namespace NxAdapters.Materials;
 
 /// <summary>Implements <see cref="IPartMaterialService"/> — the seam to the live NX work part.
-/// GetSolidBodies/GetCurrentAssignments always rescan (<see cref="BodyResolver.Refresh"/>) rather than
-/// trusting cached state, per the interface's contract.
-///
-/// NOTE: despite the interface's name, <see cref="GetSolidBodies"/> returns every body in the work part
-/// (Solid, Sheet, and Unknown kinds), not just solids — <c>BlockRestrictedBodyTypeRule</c> in Core
-/// already depends on Sheet bodies showing up here (it blocks casting-category materials specifically
-/// on Sheet bodies), so filtering them out here would make that rule unreachable.</summary>
+/// GetBodies/GetCurrentAssignments always rescan (<see cref="BodyResolver.Refresh"/>) rather than
+/// trusting cached state, per the interface's contract.</summary>
 public sealed class PartMaterialService : IPartMaterialService
 {
     private readonly NxSessionContext _context;
     private readonly BodyResolver _bodyResolver;
-    private readonly CoatingDisplayMaterialAssigner _displayMaterialAssigner;
+    private readonly DisplayMaterialHelper _displayMaterialHelper;
     private readonly Dictionary<string, Func<SideEffectInstruction, Body, OperationResult>> _executors;
     private IReadOnlyList<NxOpen.Foundation.Contracts.Materials.MaterialLibrary> _resolutionLibraries = Array.Empty<NxOpen.Foundation.Contracts.Materials.MaterialLibrary>();
 
-    public PartMaterialService(         
+    public PartMaterialService(
         NxSessionContext context,
         BodyResolver? bodyResolver = null,
-        CoatingDisplayMaterialAssigner? displayMaterialAssigner = null)
+        DisplayMaterialHelper? displayMaterialHelper = null)
     {
         _context = context;
         _bodyResolver = bodyResolver ?? new BodyResolver(context);
-        _displayMaterialAssigner = displayMaterialAssigner ?? new CoatingDisplayMaterialAssigner(context);
+        _displayMaterialHelper = displayMaterialHelper ?? new DisplayMaterialHelper(context);
         _executors = new Dictionary<string, Func<SideEffectInstruction, Body, OperationResult>>
         {
-            [SideEffectInstructionTypes.AssignDisplayMaterial] = _displayMaterialAssigner.Execute,
-            // SideEffectInstructionTypes.SyncPhysicalProperty has no executor yet — deliberately deferred
-            // (see the plan's "out of scope this round" note). ApplyPlan logs+skips unregistered types
-            // rather than failing, so SyncPhysicalPropertiesEffectRule can keep emitting them upstream.
+            [SideEffectInstructionTypes.AssignDisplayMaterial] = _displayMaterialHelper.Execute,
         };
     }
 
-    /// <summary>Non-interface: <see cref="GetCurrentAssignments"/> takes no parameters (fixed interface
-    /// signature), so the presenter sets which loaded libraries to best-effort match physical-material
-    /// names against separately, whenever the library selection changes.</summary>
     public void SetResolutionLibraries(IReadOnlyList<NxOpen.Foundation.Contracts.Materials.MaterialLibrary> libraries) =>
         _resolutionLibraries = libraries;
 
-    public IReadOnlyList<BodyInfo> GetSolidBodies()
+    public IReadOnlyList<BodyInfo> GetBodies()
     {
         var uf = _context.UFSession;
         var bodies = _bodyResolver.Refresh();
@@ -156,13 +145,19 @@ public sealed class PartMaterialService : IPartMaterialService
             : OperationResult.Success();
     }
 
-    /// <summary>Non-interface: direct action for the dialog's "Clear Material" button — bypasses the Core
-    /// planner/finalizer pipeline entirely (there is no requested material to plan against when clearing).
-    /// Clears both the physical (bulk) material and the display/coating material.</summary>
     public OperationResult ClearMaterial(IReadOnlyList<BodyId> bodyIds)
     {
         using var undo = new UndoScope(_context.Session, "Clear Material");
-        _bodyResolver.Refresh();
+
+        try
+        {
+            _bodyResolver.Refresh();
+        }
+        catch (NXException ex)
+        {
+            _context.Log.Error($"Failed to resolve bodies before clearing: NX {ex.ErrorCode}: {ex.Message}");
+            return OperationResult.Fail("CLEAR_ABORTED", ex.Message);
+        }
 
         var anyAttempted = false;
         var anyFailed = false;
@@ -188,7 +183,7 @@ public sealed class PartMaterialService : IPartMaterialService
                 _context.Log.Error($"Failed to remove physical material from body '{bodyId}': NX {ex.ErrorCode}: {ex.Message}");
             }
 
-            var displayResult = _displayMaterialAssigner.Remove(body);
+            var displayResult = _displayMaterialHelper.Remove(body);
             if (!displayResult.Ok)
             {
                 anyFailed = true;
@@ -197,7 +192,7 @@ public sealed class PartMaterialService : IPartMaterialService
         }
 
         if (!anyAttempted && bodyIds.Count > 0)
-            return OperationResult.Fail("APPLY_ABORTED", "No target bodies could be resolved.");
+            return OperationResult.Fail("CLEAR_ABORTED", "No target bodies could be resolved.");
 
         undo.Commit();
         return anyFailed
@@ -274,7 +269,7 @@ public sealed class PartMaterialService : IPartMaterialService
     {
         // VERIFY: candidate UF_MTRL function group (UFSession.Mtrl) for bulk/physical material assignment,
         // mirroring the same UFSession.<Subsystem> pattern already used for display material
-        // (UFSession.Disp) in CoatingDisplayMaterialAssigner. Exact method name/signature, and even
+        // (UFSession.Disp) in DisplayMaterialHelper. Exact method name/signature, and even
         // whether this subsystem exists under this name on the installed version, are unconfirmed.
         string? name = null;
         try
@@ -299,7 +294,7 @@ public sealed class PartMaterialService : IPartMaterialService
     private DisplayMaterial? ReadCurrentDisplayMaterial(UFSession uf, Body body)
     {
         // VERIFY: exact UFSession.Disp "ask material on object" + "ask name/color" calls — read-side
-        // counterpart of the already-VERIFY-flagged calls in CoatingDisplayMaterialAssigner
+        // counterpart of the already-VERIFY-flagged calls in DisplayMaterialHelper
         // (CreateMaterial/AskMaterialByName/SetMaterialColor/PutMaterial).
         try
         {
@@ -326,7 +321,7 @@ public sealed class PartMaterialService : IPartMaterialService
     private static void RemovePhysicalMaterial(UFSession uf, Body body)
     {
         // VERIFY: may not simply be SetBodyMaterial(body.Tag, "") — a distinct removal call may exist
-        // instead (mirrors the same open question as CoatingDisplayMaterialAssigner.RemoveFromBody).
+        // instead (mirrors the same open question as DisplayMaterialHelper.RemoveFromBody).
         uf.Mtrl.SetBodyMaterial(body.Tag, string.Empty);
     }
 }
