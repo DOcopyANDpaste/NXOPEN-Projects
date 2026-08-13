@@ -4,6 +4,7 @@ using Core.MaterialLibrary;
 using NXOpen;
 using NxAdapters.Materials;
 using NxAdapters.Ui;
+using NxAdapters.Ui.MaterialPropDisplay;
 using NxOpen.Foundation.Core.MaterialLibrary;
 using NxOpen.Foundation.NxAdapters;
 
@@ -25,12 +26,15 @@ public static class MaterialAssignmentCommand
 
         var bodyResolver = new BodyResolver(context);
         var displayMaterialHelper = new DisplayMaterialHelper(context);
-        var partMaterialService = new PartMaterialService(context, bodyResolver, displayMaterialHelper);
+        // Owns the only path that touches NX's own material library, which is slow — see the class doc for
+        // why that happens lazily, per material, and only after asking.
+        var physicalMaterials = new NxPhysicalMaterialSource(context);
+        var partMaterialService = new PartMaterialService(context, bodyResolver, displayMaterialHelper, physicalMaterials);
 
         var libraryRepository = new FileSystemMaterialLibraryRepository(onWarning: context.Log.Warn);
         var libraryParser = new MaterialLibraryParser();
         var libraryLoader = new CachingMaterialLibraryLoader(libraryRepository, libraryParser);
-        var tabGrouper = new MaterialTabGrouper();
+        var categoryTreeBuilder = new MaterialCategoryTreeBuilder();
 
         var planner = new MaterialAssignmentPlanner(new IMaterialAssignmentRule[]
         {
@@ -48,15 +52,31 @@ public static class MaterialAssignmentCommand
             new SyncCoatingDisplayMaterialEffectRule(),
         });
 
-        // VERIFY: real Styler-generated dialog construction/launch — MaterialAssignmentDialog is itself a
-        // conceptual placeholder (see its own doc comment) until the real .dlx exists.
-        var dialog = new MaterialAssignmentDialog();
-        var blocks = new BlockAccessor(dialog.TheDialog, context.Log.Warn);
+        // The Styler-generated dialog. Constructing it creates the BlockDialog from BlockUI.dlx, so the
+        // accessor can be handed it straight away — it resolves its blocks later, from initialize_cb.
+        var dialog = new BlockUI();
+        var blocks = new BlockAccessor(dialog.TheDialog, bodyResolver, context.Log.Warn);
+        var propertyWindow = new MaterialPropertyWindow(context.Log.Warn);
         var presenter = new MaterialAssignmentDialogPresenter(
-            context, blocks, partMaterialService, libraryRepository, libraryLoader, tabGrouper, planner, finalizer);
+            context,
+            blocks,
+            partMaterialService,
+            libraryRepository,
+            libraryLoader,
+            categoryTreeBuilder,
+            planner,
+            finalizer,
+            propertyWindow);
 
         dialog.Presenter = presenter;
-        dialog.Show();
+        try
+        {
+            dialog.Show();
+        }
+        finally
+        {
+            dialog.Dispose();
+        }
     }
 
     // NX asks the assembly whether it can be unloaded — implemented so the DLL unloads predictably during development.

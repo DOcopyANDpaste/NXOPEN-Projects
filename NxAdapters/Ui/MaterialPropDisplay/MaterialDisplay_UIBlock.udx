@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<UserDefinedUIBlockPalette Creator="b1025118" NX="Designcenter 2606" Saved="Wed Aug 12 21:22:07 2026
+"><PaletteEntry id="MaterialDisplay_UIBlock"><ObjectData class="NewStylerItem"><NewStylerItem><item AutomationClass="MaterialDisplay_UIBlock" class="MaterialDisplay_UIBlock.dlx" icon="hand"/></NewStylerItem></ObjectData><Presentation category="User Defined UI Block" description="User Defined UI Block" name="MaterialPropertyDisplay"/></PaletteEntry>
+</UserDefinedUIBlockPalette>

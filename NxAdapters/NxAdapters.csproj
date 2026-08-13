@@ -37,26 +37,37 @@
 
   <!--
     Per Skills/common.md non-negotiable #4: no hardcoded install paths, reference via UGII_BASE_DIR.
-    Managed-assembly folder name/layout ("managed\NXOpen.dll", "managed\NXOpen.UF.dll") is the common
-    convention for recent NX versions but is NOT verified against a real install — confirm and correct
-    against your installed NX version before this will resolve.
+    Verified against NX 2412: the managed assemblies live in NXBIN\managed (net48), NOT directly under
+    $(UGII_BASE_DIR)\managed as previously assumed. NXBIN\managed_core is the .NET-Core-targeted copy —
+    this project is net48, so it wants the former.
   -->
+  <PropertyGroup>
+    <NxManagedDir>$(UGII_BASE_DIR)\NXBIN\managed</NxManagedDir>
+  </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="NXOpen">
-      <HintPath>$(UGII_BASE_DIR)\managed\NXOpen.dll</HintPath>
+      <HintPath>$(NxManagedDir)\NXOpen.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="NXOpen.UF">
-      <HintPath>$(UGII_BASE_DIR)\managed\NXOpen.UF.dll</HintPath>
+      <HintPath>$(NxManagedDir)\NXOpen.UF.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!--
+      NXOpen.BlockStyler (Tree, Node, TreeListMenu, BlockDialog, PropertyList, …) ships in NXOpenUI.dll,
+      NOT NXOpen.dll — confirmed against the NX 2412 install. Without this the whole Ui folder fails to
+      compile.
+    -->
+    <Reference Include="NXOpenUI">
+      <HintPath>$(NxManagedDir)\NXOpenUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- NXOpen.TaggedObject (which BlockStyler.Node derives from) lives here, not in NXOpen.dll. -->
+    <Reference Include="NXOpen.Utilities">
+      <HintPath>$(NxManagedDir)\NXOpen.Utilities.dll</HintPath>
       <Private>False</Private>
     </Reference>
   </ItemGroup>
-
-  <!--
-    VERIFY: NXOpen.BlockStyler types (used by Ui/BlockAccessor.cs, Ui/MaterialAssignmentDialog.cs) are
-    assumed to resolve from the NXOpen reference above. If the installed NX version ships Block UI Styler
-    types in a separate managed assembly instead, add a Reference for it here the same way, via
-    $(UGII_BASE_DIR)\managed\.
-  -->
 
 </Project>

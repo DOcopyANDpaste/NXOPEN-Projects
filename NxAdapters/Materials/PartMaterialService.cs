@@ -18,17 +18,20 @@ public sealed class PartMaterialService : IPartMaterialService
     private readonly NxSessionContext _context;
     private readonly BodyResolver _bodyResolver;
     private readonly DisplayMaterialHelper _displayMaterialHelper;
+    private readonly NxPhysicalMaterialSource _physicalMaterials;
     private readonly Dictionary<string, Func<SideEffectInstruction, Body, OperationResult>> _executors;
     private IReadOnlyList<NxOpen.Foundation.Contracts.Materials.MaterialLibrary> _resolutionLibraries = Array.Empty<NxOpen.Foundation.Contracts.Materials.MaterialLibrary>();
 
     public PartMaterialService(
         NxSessionContext context,
         BodyResolver? bodyResolver = null,
-        DisplayMaterialHelper? displayMaterialHelper = null)
+        DisplayMaterialHelper? displayMaterialHelper = null,
+        NxPhysicalMaterialSource? physicalMaterials = null)
     {
         _context = context;
         _bodyResolver = bodyResolver ?? new BodyResolver(context);
         _displayMaterialHelper = displayMaterialHelper ?? new DisplayMaterialHelper(context);
+        _physicalMaterials = physicalMaterials ?? new NxPhysicalMaterialSource(context);
         _executors = new Dictionary<string, Func<SideEffectInstruction, Body, OperationResult>>
         {
             [SideEffectInstructionTypes.AssignDisplayMaterial] = _displayMaterialHelper.Execute,
@@ -64,7 +67,7 @@ public sealed class PartMaterialService : IPartMaterialService
         foreach (var body in bodies)
         {
             var id = BodyResolver.GetBodyId(body);
-            var (materialName, resolvedId) = ReadPhysicalMaterial(uf, body);
+            var (materialName, resolvedId) = ReadPhysicalMaterial(body);
             var displayMaterial = ReadCurrentDisplayMaterial(uf, body);
             result[id] = new BodyMaterialAssignment(id, materialName, resolvedId, displayMaterial);
         }
@@ -75,6 +78,10 @@ public sealed class PartMaterialService : IPartMaterialService
     public OperationResult ApplyPlan(ExecutablePlan plan)
     {
         using var undo = new UndoScope(_context.Session, "Apply Material Assignment");
+
+        // One apply is one batch: a material the user declines to load is asked about once here, not once
+        // per body, but the decline does not carry over into the next apply.
+        _physicalMaterials.BeginBatch();
 
         try
         {
@@ -98,11 +105,23 @@ public sealed class PartMaterialService : IPartMaterialService
                 continue;
             }
 
-            var materialName = ResolveMaterialName(assignment.MaterialId);
-            if (materialName is null)
+            var resolved = ResolveMaterial(assignment.MaterialId);
+            if (resolved is null)
             {
                 anyFailed = true;
                 _context.Log.Error($"Skipped assignment for body '{assignment.BodyId}': material '{assignment.MaterialId}' not found in the resolution libraries (was SetResolutionLibraries called with the library it came from?).");
+                continue;
+            }
+
+            var (libraryName, materialName) = resolved.Value;
+
+            // The material has to exist in the part before it can be assigned, which may mean a slow load
+            // from the NX library. Failing here fails only this body — the rest of the plan still applies.
+            var physicalMaterial = _physicalMaterials.Resolve(libraryName, materialName, out var failureReason);
+            if (physicalMaterial is null)
+            {
+                anyFailed = true;
+                _context.Log.Error($"Skipped assignment for body '{assignment.BodyId}': {failureReason}");
                 continue;
             }
 
@@ -110,7 +129,7 @@ public sealed class PartMaterialService : IPartMaterialService
 
             try
             {
-                WritePhysicalMaterial(_context.UFSession, body, materialName);
+                WritePhysicalMaterial(physicalMaterial, body);
             }
             catch (NXException ex)
             {
@@ -200,17 +219,27 @@ public sealed class PartMaterialService : IPartMaterialService
             : OperationResult.Success();
     }
 
-    /// <summary>Looks up a requested material's NX-catalog name from whatever libraries the presenter last
-    /// registered via <see cref="SetResolutionLibraries"/> — <see cref="ExecutableAssignment.MaterialId"/>
-    /// alone isn't enough to write a physical material (NX identifies materials by name, and MaterialId is
-    /// the library's own id, e.g. a MatML "id" attribute, not the display name).</summary>
-    private string? ResolveMaterialName(MaterialId materialId) =>
-        _resolutionLibraries
-            .SelectMany(library => library.Materials)
-            .FirstOrDefault(material => material.Id == materialId)
-            ?.Name;
+    /// <summary>Looks up a requested material's NX-catalog name, and the library it came from, out of
+    /// whatever libraries the presenter last registered via <see cref="SetResolutionLibraries"/>.
+    /// <see cref="ExecutableAssignment.MaterialId"/> alone isn't enough to write a physical material: NX
+    /// identifies materials by name, and MaterialId is the library's own id (e.g. a MatML "id" attribute),
+    /// not the display name.
+    ///
+    /// The library name comes back too because loading from NX's library needs it, and because both sides
+    /// read the same library files the NX library name is taken to be our library's display name.</summary>
+    private (string LibraryName, string MaterialName)? ResolveMaterial(MaterialId materialId)
+    {
+        foreach (var library in _resolutionLibraries)
+        {
+            var material = library.Materials.FirstOrDefault(candidate => candidate.Id == materialId);
+            if (material is not null)
+                return (library.DisplayName, material.Name);
+        }
 
-    // ---- VERIFY-flagged NX reads/writes ----
+        return null;
+    }
+
+    // ---- NX reads/writes ----
 
     private static BodyKind ClassifyBody(Body body)
     {
@@ -232,14 +261,31 @@ public sealed class PartMaterialService : IPartMaterialService
         if (kind != BodyKind.Solid)
             return 0.0;
 
-        // VERIFY: exact mass-properties API — candidates are UFSession.Modl.AskMassProps3d (low-level UF,
-        // real signature has more parameters than shown here — accuracy, density, output arrays for mass/
-        // volume/inertia) or Session.MeasureManager's higher-level measure-bodies call. Units are assumed
-        // to come back in part units, unconverted.
         try
         {
-            uf.Modl.AskMassProps3d(body.Tag, 0.999, out var volume);
-            return volume;
+            // acc_value is a fixed double[11]; only [0] (relative accuracy, 0-1) matters for volume.
+            var accuracyValues = new double[11];
+            accuracyValues[0] = 0.999;
+
+            // mass_props and statistics are caller-allocated and filled in place — they are [Out]-attributed
+            // but NOT by-ref, so they must be sized correctly up front rather than passed with `out`.
+            var massProperties = new double[47];
+            var statistics = new double[13];
+
+            uf.Modl.AskMassProps3d(
+                new[] { body.Tag },
+                1,                    // num_objs
+                1,                    // type: 1 = solid bodies
+                4,                    // units: 1=lb/in 2=lb/ft 3=g/cm 4=kg/m. There is no "part units"
+                                      // option, so this is a fixed choice — volume comes back in m^3.
+                0.0,                  // density — ignored, the body carries its own
+                1,                    // accuracy: 1 = use acc_value
+                accuracyValues,
+                massProperties,
+                statistics);
+
+            // [0] is area, [1] volume, [2] mass.
+            return massProperties[1];
         }
         catch (NXException)
         {
@@ -265,20 +311,19 @@ public sealed class PartMaterialService : IPartMaterialService
         return result;
     }
 
-    private (string? name, MaterialId? resolvedId) ReadPhysicalMaterial(UFSession uf, Body body)
+    private (string? name, MaterialId? resolvedId) ReadPhysicalMaterial(Body body)
     {
-        // VERIFY: candidate UF_MTRL function group (UFSession.Mtrl) for bulk/physical material assignment,
-        // mirroring the same UFSession.<Subsystem> pattern already used for display material
-        // (UFSession.Disp) in DisplayMaterialHelper. Exact method name/signature, and even
-        // whether this subsystem exists under this name on the installed version, are unconfirmed.
+        // Physical (bulk) material is a managed-API concept — there is no UFSession.Mtrl subsystem. The
+        // deprecated UF equivalent is UFSf.LocateMaterial; AskMaterialOfObject is its documented successor.
         string? name = null;
         try
         {
-            uf.Mtrl.AskBodyMaterial(body.Tag, out name);
+            name = _context.WorkPart.MaterialManager.PhysicalMaterials.AskMaterialOfObject(body)?.Name;
         }
         catch (NXException)
         {
-            // treated as "no physical material assigned"
+            // A body with no physical material throws rather than returning null, so this is the normal
+            // "unassigned" path, not an error.
         }
 
         if (string.IsNullOrEmpty(name))
@@ -291,20 +336,16 @@ public sealed class PartMaterialService : IPartMaterialService
         return (name, resolved?.Id);
     }
 
-    private DisplayMaterial? ReadCurrentDisplayMaterial(UFSession uf, Body body)
+    private static DisplayMaterial? ReadCurrentDisplayMaterial(UFSession uf, Body body)
     {
-        // VERIFY: exact UFSession.Disp "ask material on object" + "ask name/color" calls — read-side
-        // counterpart of the already-VERIFY-flagged calls in DisplayMaterialHelper
-        // (CreateMaterial/AskMaterialByName/SetMaterialColor/PutMaterial).
         try
         {
-            uf.Disp.AskMaterial(body.Tag, out var materialTag);
-            if (materialTag.Equals(Tag.Null))
+            // AskMaterial hands back the name alongside the tag, so no second lookup is needed.
+            uf.Disp.AskMaterial(body.Tag, out var materialTag, out var name);
+            if (materialTag.Equals(Tag.Null) || string.IsNullOrEmpty(name))
                 return null;
 
-            uf.Disp.AskMaterialName(materialTag, out var name);
-            uf.Disp.AskMaterialColor(materialTag, out var r, out var g, out var b);
-            return new DisplayMaterial(new MaterialId(name), name, ((byte)Math.Round(r * 255), (byte)Math.Round(g * 255), (byte)Math.Round(b * 255)));
+            return new DisplayMaterial(new MaterialId(name), name, ReadBodyRgb(uf, body));
         }
         catch (NXException)
         {
@@ -312,16 +353,29 @@ public sealed class PartMaterialService : IPartMaterialService
         }
     }
 
-    private static void WritePhysicalMaterial(UFSession uf, Body body, string materialName)
+    /// <summary>The body's color as RGB bytes. Read off the BODY, not the material: NX exposes no color on a
+    /// display material, so <see cref="DisplayMaterialHelper"/> writes the coating color to the body and
+    /// this is the matching read. It will not round-trip exactly — the write snaps to NX's color table.</summary>
+    private static (byte R, byte G, byte B) ReadBodyRgb(UFSession uf, Body body)
     {
-        // VERIFY: write-side counterpart of ReadPhysicalMaterial — exact UFSession.Mtrl method/signature.
-        uf.Mtrl.SetBodyMaterial(body.Tag, materialName);
+        // clr_values is caller-allocated and filled in place (three components, 0-1), not an `out`.
+        var rgb = new double[3];
+        uf.Disp.AskColor(body.Color, UFConstants.UF_DISP_rgb_model, out _, rgb);
+
+        return ((byte)Math.Round(rgb[0] * 255), (byte)Math.Round(rgb[1] * 255), (byte)Math.Round(rgb[2] * 255));
     }
+
+    private static void WritePhysicalMaterial(PhysicalMaterial material, Body body) =>
+        material.AssignObjects(new NXObject[] { body });
 
     private static void RemovePhysicalMaterial(UFSession uf, Body body)
     {
-        // VERIFY: may not simply be SetBodyMaterial(body.Tag, "") — a distinct removal call may exist
-        // instead (mirrors the same open question as DisplayMaterialHelper.RemoveFromBody).
-        uf.Mtrl.SetBodyMaterial(body.Tag, string.Empty);
+        // UFSf.UnlinkMaterial is deprecated (NX 2312), and the replacement the header names —
+        // PhysicalMaterial.UnassignObjects() — does not exist in NX 2412's managed API. The only managed
+        // unassign is UnassignAllObjects(), which strips the material from EVERY body using it. So this
+        // stays on the deprecated call deliberately: do not "modernize" it into the all-bodies version.
+#pragma warning disable CS0618 // deprecated with no working replacement — see above
+        uf.Sf.UnlinkMaterial(body.Tag);
+#pragma warning restore CS0618
     }
 }

@@ -1,0 +1,122 @@
+﻿Option Strict Off
+Option Explicit On
+Imports System
+Imports NXOpen
+Imports NXOpen.UF
+
+Module materialInheritColors
+
+
+    '  Explicit Activation
+    '      This entry point is used to activate the application explicitly
+    Dim theSession As Session = Session.GetSession()
+    Dim lw As ListingWindow = theSession.ListingWindow
+    Dim theUfSession = UFSession.GetUFSession()
+    Sub Main()
+        Dim workPart As Part = theSession.Parts.Work
+        lw.Open()
+        Dim material_tag As Tag = Tag.Null
+        Try
+            ' theUfSession.Disp.CreateMaterial("Default_Coating_Color", material_tag)
+
+            For Each aMaterial As PhysicalMaterial In workPart.MaterialManager.PhysicalMaterials.ToArray()
+                'aMaterial.UnassignAllObjects()
+                Dim id As String = aMaterial.GetId()
+                'dim id as string=aMaterial.GetId()
+                DialogPrint("Part Material Name=" + aMaterial.Name)
+                ' checking inherited value for CoatingsStudioMaterialName
+                'dim studioMaterialName as string=aMaterial.GetPropertyValue("CoatingsStudioMaterialName")
+                ' Dim studioMaterialName As String = aMaterial.GetPropertyInheritedValue("CoatingsStudioMaterialName")
+                ' Dim overrideMaterial As String = aMaterial.IsPropertyOverridden("CoatingsStudioMaterialName")
+                ' Dim colorMaterialName As String = aMaterial.GetPropertyInheritedValue("CoatingsVisualizationColor")
+                ' DialogPrint("Studio Material Inherited=" + studioMaterialName)
+                '
+                'Getting the material properties table to get the coating color and studio name
+                Dim matProperties As BasePropertyTable = aMaterial.GetPropTable()
+                ' Getting the studio material name from the material properties table
+                Dim studioMaterialNameActual As String = matProperties.GetStringPropertyValue("CoatingsStudioMaterialName")
+                ' Getting the array RGB code color from the material properties table
+                Dim colorFromCoating(2) As Double
+                colorFromCoating = matProperties.GetScalarArrayPropertyValue("CoatingsVisualizationColor")
+                ' print the color obtained from the material properties table
+                DialogPrint("Color RGB=" + colorFromCoating(0).ToString() + " ," + colorFromCoating(1).ToString() + " ," + colorFromCoating(2).ToString())
+                ' Confirming if the color is in 0-255 range or 0-1 range and adjusting to 0-1 range if needed, as UF_DISP_rgb_model expects color values in 0-1 range
+                
+                If colorFromCoating(0) > 1 Then
+                    colorFromCoating(0) = colorFromCoating(0) / 255
+                End If
+                If colorFromCoating(1) > 1 Then
+                    colorFromCoating(1) = colorFromCoating(1) / 255
+                End If
+                If colorFromCoating(2) > 1 Then
+                    colorFromCoating(2) = colorFromCoating(2) / 255
+                End If
+                
+                DialogPrint("Color RGB adjusted for Transformation=" + colorFromCoating(0).ToString() + " ," + colorFromCoating(1).ToString() + " ," + colorFromCoating(2).ToString())
+                'Dreclaring the variable to set the number of color based with the UF AskClosestColor function
+                Dim colorNumber As Integer = 0
+                theUfSession.Disp.AskClosestColor(UFConstants.UF_DISP_rgb_model, colorFromCoating, UFConstants.UF_DISP_CCM_EUCLIDEAN_DISTANCE, colorNumber)
+                ' printing the color number obtained from the AskClosestColor function
+                DialogPrint("Color Number=" + colorNumber.ToString())
+                DialogPrint("Studio Material=" + studioMaterialNameActual)
+                'Declaring the variable to get the geometry that has the material assigned to it
+                Dim nxObjs() As NXObject = Nothing
+                Dim new_material_name As String = ""
+                ' obtaining the geometry with the material assigned to objs
+                aMaterial.GetUsage(nxObjs)
+                DialogPrint("Number of bodies with this material = " & nxObjs.Length.ToString())
+                ' if nxobjects number is more that 0 it can perform the color assignment
+                If nxObjs.Length > 0 Then
+                    ' creating a material in the display with the same studio material name and assigning the color obtained from the coating color to it, this is needed as the UF_DISP_AssignMaterial function needs a material in the display to assign it to the geometry, we cannot assign a material that is not in the display
+                    theUfSession.Disp.CreateMaterial(studioMaterialNameActual, material_tag, new_material_name)
+                    For Each bd As Body In nxObjs
+                        ' DialogPrint("body = " & bd.Name.ToString())
+                        theUfSession.Disp.AssignMaterial(material_tag, bd.Tag)
+                        bd.Color = colorNumber
+                        bd.RedisplayObject()
+                    Next
+                End If
+            Next
+            ' update display of all objects with the material assigned above
+            Dim object_tags() As Tag = Nothing
+            Dim object_count As Integer = 0
+            theUfSession.Disp.AskGeometryOfMaterial(material_tag, object_count, object_tags)
+            theUfSession.Disp.UpdateMaterialDisplayOfGeometry(object_count, object_tags)
+            theSession.Parts.Display.Views.Refresh() ' refresh the display to show the new color
+        Catch ex As Exception
+            DialogPrint("Error there are not material in the part: " + ex.Message)
+            Return
+        End Try
+            
+        End Sub
+
+        Public Sub DialogPrint(ByVal infoline As String)
+        'Unloads the image when the NX session terminates
+        If 1 = 1 Then
+            lw.Open()
+            lw.WriteLine(infoline)
+        End If
+
+    End Sub
+
+
+
+
+
+    Public Function GetUnloadOption(ByVal dummy As String) As Integer
+
+        'Unloads the image when the NX session terminates
+        GetUnloadOption = NXOpen.Session.LibraryUnloadOption.AtTermination
+
+        '----Other unload options-------
+        'Unloads the image immediately after execution within NX
+        'GetUnloadOption = NXOpen.Session.LibraryUnloadOption.Immediately
+
+        'Unloads the image explicitly, via an unload dialog
+        'GetUnloadOption = NXOpen.Session.LibraryUnloadOption.Explicitly
+        '-------------------------------
+
+    End Function
+
+
+End Module

@@ -1,0 +1,46 @@
+﻿Option Strict Off
+Imports System
+Imports System.Collections
+Imports NXOpen
+Imports NXOpen.UF
+
+Module report_studio_materials_in_part
+
+    Dim theSession As Session = Session.GetSession()
+    Dim ufs As UFSession = UFSession.GetUFSession()
+    Dim theUI As UI = UI.GetUI()
+    Dim lw As ListingWindow = theSession.ListingWindow
+
+    Sub Main
+
+        Dim materials As New SortedList()
+        get_part_materials(materials)
+        lw.Open()
+        If materials.Count = 0 Then
+            lw.WriteLine("Part has no materials applied.")
+        Else
+            For Each material As DictionaryEntry in materials
+                lw.WriteLine("Part Material " + material.Key.ToString() + " is " + material.Value)
+            Next
+        End If
+
+    End Sub
+
+    Function get_part_materials(ByRef materials As SortedList)
+
+        Dim matTag As Tag = Tag.Null
+        ufs.Obj.CycleObjsInPart ( theSession.Parts.Work.Tag, _
+                          UFConstants.UF_material_type, _
+                          matTag)
+        While matTag <> Tag.Null
+            Dim matName As String = Nothing
+            ufs.Obj.AskName(matTag, matName)
+            materials.Add(matTag, matName)
+            ufs.Obj.CycleObjsInPart ( theSession.Parts.Work.Tag, _
+                          UFConstants.UF_material_type, _
+                          matTag)
+        End While
+
+    End Function
+
+End Module

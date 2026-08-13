@@ -9,13 +9,16 @@ namespace NxAdapters.Materials;
 
 /// <summary>Reads and writes a body's display/coating material via UFSession.Disp. Executes
 /// ASSIGN_DISPLAY_MATERIAL side-effect instructions (emitted by
-/// <see cref="SyncCoatingDisplayMaterialEffectRule"/>): looks up a display material by name, creates it
-/// if missing, refreshes its RGB either way, and assigns it to the target body.
+/// <see cref="SyncCoatingDisplayMaterialEffectRule"/>): finds the named display material in the part,
+/// creates it if missing, assigns it to the target body, and colors the body to match the coating.
 ///
-/// IMPORTANT — every UFSession.Disp call below is a BEST-EFFORT PLACEHOLDER. There is no NX
-/// installation on the machine this was written on, so exact UFDisp method names/signatures are
-/// unverified and must be confirmed/corrected against the real NX Open .NET reference for the installed
-/// NX version before this will even compile, let alone run.
+/// The color half needs explaining, because it is not what it looks like. NX has NO API to set a display
+/// material's color — <c>uf_disp.h</c> exposes create/assign/delete/query for materials and nothing that
+/// writes an RGB, because a Studio material's appearance comes from its own definition. The way NX's own
+/// sample code produces a colored coating (see <c>RefONLY/materialInheritColors.txt</c>) is to assign the
+/// display material AND set <see cref="Body.Color"/> to the nearest entry in NX's color table. That is
+/// what this class does. The mapping is lossy on purpose: <c>AskClosestColor</c> snaps to the table, so the
+/// color read back off a body will not equal the coating RGB written to it.
 ///
 /// No undo-handling here by design: <see cref="PartMaterialService.ApplyPlan"/> calls this from inside
 /// the single UndoScope that already wraps the whole ExecutablePlan. NX's native undo mechanism is
@@ -62,10 +65,12 @@ public sealed class DisplayMaterialHelper
 
         try
         {
-            // RGB components are normalized 0-1 (NOT 0-255 bytes).
             var ufSession = _context.UFSession;
-            var materialTag = GetOrCreateDisplayMaterial(ufSession, name, rgb[0], rgb[1], rgb[2]);
+            var materialTag = GetOrCreateDisplayMaterial(ufSession, _context.WorkPart.Tag, name);
+
             AssignToBody(ufSession, body, materialTag);
+            ApplyCoatingColor(ufSession, body, rgb);
+            RefreshMaterialDisplay(ufSession, materialTag);
 
             return OperationResult.Success();
         }
@@ -96,56 +101,94 @@ public sealed class DisplayMaterialHelper
 
     private static void RemoveFromBody(UFSession ufSession, Body body)
     {
-        // VERIFY: exact "remove/clear display material from object" method/signature — candidate is
-        // calling the same "put material" call AssignToBody uses, with Tag.Null in place of a real
-        // material tag, but that is unconfirmed; a dedicated removal call may exist instead.
-        ufSession.Disp.PutMaterial(body.Tag, Tag.Null);
+        // Applies the "None" material to the object. Note this does NOT delete the material from the part,
+        // which is the wanted behavior — other bodies may still be using it.
+        ufSession.Disp.RemoveMaterialAssignment(body.Tag);
     }
 
-    private static Tag GetOrCreateDisplayMaterial(UFSession ufSession, string name, double r, double g, double b)
+    private static Tag GetOrCreateDisplayMaterial(UFSession ufSession, Tag partTag, string name)
     {
-        if (TryFindExistingMaterial(ufSession, name, out var existingTag))
-        {
-            // Always refresh the color even for an existing material, in case the coating library's
-            // color changed since this display material was first created.
-            SetMaterialColor(ufSession, existingTag, r, g, b);
+        // Look before creating. This is not an optimization: UF_DISP_create_material has no get-or-create
+        // behavior, so calling it for a name that already exists silently produces a duplicate material
+        // and every subsequent lookup becomes ambiguous.
+        if (TryFindExistingMaterial(ufSession, partTag, name, out var existingTag))
             return existingTag;
-        }
 
-        // VERIFY: exact "create display material" method/signature (name is a guess).
-        ufSession.Disp.CreateMaterial(name, out var newTag);
-        SetMaterialColor(ufSession, newTag, r, g, b);
+        // The name NX actually assigns can differ from the one requested, so it is the created material's
+        // own tag that gets used from here — never a second lookup by the requested name.
+        ufSession.Disp.CreateMaterial(name, out var newTag, out _);
         return newTag;
     }
 
-    private static bool TryFindExistingMaterial(UFSession ufSession, string name, out Tag materialTag)
+    private static bool TryFindExistingMaterial(UFSession ufSession, Tag partTag, string name, out Tag materialTag)
     {
+        materialTag = Tag.Null;
+
         try
         {
-            // VERIFY: exact "find display material by name" method/signature (name is a guess).
-            ufSession.Disp.AskMaterialByName(name, out materialTag);
-            return true;
+            // There is no "find material by name" call, so the part's materials are enumerated and matched
+            // by name. VERIFY: MaterialFormatType depends on the active renderer — ShIrayplus matches
+            // CreateMaterial's documented iray+-only behavior, but if lookups never find anything at
+            // runtime, this is the first thing to try changing (ShAuthor / ShMax).
+            ufSession.Disp.AskMaterialsInPart(
+                partTag, UFDisp.MaterialFormatType.ShIrayplus, out _, out var tags, out var names);
+
+            if (names is null || tags is null)
+                return false;
+
+            for (var i = 0; i < names.Length && i < tags.Length; i++)
+            {
+                if (!string.Equals(names[i], name, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                materialTag = tags[i];
+                return true;
+            }
+
+            return false;
         }
         catch (NXException)
         {
-            // VERIFY: confirm "not found" genuinely surfaces as an NXException here rather than, say,
-            // a specific out-parameter/return-code convention that should be checked explicitly instead
-            // of caught broadly — a broad catch here could also mask an unrelated real failure.
-            materialTag = Tag.Null;
+            // A part with no display materials at all is a normal state, not a failure.
             return false;
         }
     }
 
-    private static void SetMaterialColor(UFSession ufSession, Tag materialTag, double r, double g, double b)
-    {
-        // VERIFY: exact method/signature, and whether it expects normalized 0-1 doubles (assumed/passed
-        // here) or 0-255 byte components — if the latter, multiply each by 255 and round before calling.
-        ufSession.Disp.SetMaterialColor(materialTag, r, g, b);
-    }
-
     private static void AssignToBody(UFSession ufSession, Body body, Tag materialTag)
     {
-        // VERIFY: exact "assign display material to object" method/signature.
-        ufSession.Disp.PutMaterial(body.Tag, materialTag);
+        // Argument order is material first, object second — the reverse of most UF object calls.
+        ufSession.Disp.AssignMaterial(materialTag, body.Tag);
+    }
+
+    /// <summary>Colors the body to match the coating. See the class summary for why the color goes on the
+    /// body rather than on the display material — NX has no API for the latter.</summary>
+    private static void ApplyCoatingColor(UFSession ufSession, Body body, double[] rgb)
+    {
+        ufSession.Disp.AskClosestColor(
+            UFConstants.UF_DISP_rgb_model,
+            ToUnitRgb(rgb),
+            UFConstants.UF_DISP_CCM_EUCLIDEAN_DISTANCE,
+            out var colorNumber);
+
+        body.Color = colorNumber;
+        body.RedisplayObject();
+    }
+
+    /// <summary>UF_DISP_rgb_model wants components in 0-1. Coating tables have been observed returning
+    /// either 0-1 or 0-255 with nothing declaring which, so the range is inferred — the same defensive
+    /// normalization the NX reference code does.</summary>
+    private static double[] ToUnitRgb(double[] rgb) =>
+        rgb.Any(component => component > 1.0)
+            ? rgb.Select(component => component / 255.0).ToArray()
+            : rgb.ToArray();
+
+    /// <summary>Pushes the new material through to what is actually on screen. Without this the assignment
+    /// is made but the viewport can keep showing the previous appearance until something else forces a
+    /// redraw.</summary>
+    private static void RefreshMaterialDisplay(UFSession ufSession, Tag materialTag)
+    {
+        ufSession.Disp.AskGeometryOfMaterial(materialTag, out var objectCount, out var objectTags);
+        if (objectCount > 0 && objectTags is not null)
+            ufSession.Disp.UpdateMaterialDisplayOfGeometry(objectCount, objectTags);
     }
 }

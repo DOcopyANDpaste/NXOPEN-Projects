@@ -1,274 +1,522 @@
-using Core.Assignment;
 using Core.Bodies;
 using Core.Common;
 using Core.MaterialLibrary;
+using NXOpen;
 using NXOpen.BlockStyler;
+using NxAdapters.Materials;
 using NxOpen.Foundation.Contracts.Common;
 using NxOpen.Foundation.Contracts.Materials;
 using NxOpen.Foundation.NxAdapters;
 
+// NXOpen ships its own Material (a part attribute) and SelectObject (a selection API type), both of which
+// collide with the ones meant here. Aliased rather than fully qualified at each use — this file mentions
+// them constantly.
+using Material = NxOpen.Foundation.Contracts.Materials.Material;
+using SelectObject = NXOpen.BlockStyler.SelectObject;
+
 namespace NxAdapters.Ui;
 
-/// <summary>All <c>dialog.GetBlock("stringId")</c> lookups and typed block reads/writes live here, per
-/// Skills/with-block-ui.md §3 — when the Styler regenerates and renames/reorders block fields, only this
-/// file changes. String IDs below are PLACEHOLDERS: the real <c>.dlx</c> doesn't exist yet (no NX install
-/// in this session), so these will need to match whatever the Styler tool actually names each block once
-/// the dialog is laid out.
+/// <summary>All <c>TopBlock.FindBlock("stringId")</c> lookups and typed block reads/writes live here, per
+/// Skills/with-block-ui.md §3 — when the Styler regenerates and renames/reorders blocks, only this file
+/// changes.
 ///
-/// Two conventions run through this class. First, every "get selection" method reads only an index (or
-/// index array) from the block and maps it back through a <c>LastPopulated*</c> list, so no domain value
-/// is ever reconstructed by parsing block text. Second, populating a list clears its selection, so a
-/// stale index can never resolve against freshly-swapped contents.
+/// The string IDs below are the REAL ones read out of <c>BlockUI.dlx</c>, replacing the placeholder set this
+/// class was originally written against. Two of them — <see cref="PendingAssignmentTreeId"/> and
+/// <see cref="MaterialThumbnailId"/> — are not in the .dlx yet and are expected to be added in the Styler;
+/// until then <see cref="TryFindBlock{T}"/> logs once and the features that need them stay inert rather than
+/// taking down a dialog that is otherwise fully functional.
 ///
-/// The material browser is currently a category dropdown + flat material list.
-/// <see cref="PopulateMaterialTabs"/> is the seam for the richer tabbed tile grid, which needs an
-/// NX-install spike first — see its doc comment.</summary>
+/// Lookups use <c>TopBlock.FindBlock</c> with a typed cast, which is what the Styler itself generates and
+/// what the NX samples use, rather than <c>dialog.GetBlock(id).GetProperties()</c>. Every
+/// <see cref="PropertyList"/> obtained here is disposed — it is a <c>TransientObject</c>, and the NX samples
+/// dispose them at every call site without exception.
+///
+/// The original conventions still hold. A selection is never turned back into a domain value by parsing what
+/// a block displays: it is mapped through what was last populated — for trees, via
+/// <see cref="TreeBinding{T}"/>. And populating clears first, so a stale row can never resolve against
+/// freshly-swapped contents.</summary>
 public sealed class BlockAccessor
 {
-    // VERIFY: placeholder string IDs — must match the real .dlx once it exists. Internal (not private) so
-    // MaterialAssignmentDialogPresenter.OnUpdate can switch on which block changed without duplicating
-    // these literals — the single source of truth for block IDs stays this class, per with-block-ui.md §3.
-    internal const string LibraryDropdownId = "libraryDropdown";
-    internal const string CategoryDropdownId = "categoryDropdown";
-    internal const string MaterialListId = "materialList";
-    internal const string MaterialTabControlId = "materialTabs";
-    internal const string MaterialPropertyPanelId = "materialPropertyPanel";
-    internal const string MaterialUsageTableId = "materialUsageTable";
-    internal const string BodyDrilldownListId = "bodyDrilldownList";
-    internal const string BodyKindFilterId = "bodyKindFilter";
-    internal const string PlanSummaryId = "planSummary";
+    // ---- Block IDs, verbatim from BlockUI.dlx ----
+    internal const string SelectedBodiesId = "Sel_SoildBodies";
     internal const string SelectAllButtonId = "selectAllButton";
     internal const string SelectUnassignedButtonId = "selectUnassignedButton";
-    internal const string RemoveButtonId = "removeButton";
-    internal const string RefreshButtonId = "refreshButton";
+    internal const string LibraryEnumId = "enum_MatLibrary";
+    internal const string MaterialTreeId = "MaterialTree";
+    internal const string CurrentAssignmentTreeId = "CurrentAssignmentTree";
+    internal const string PendingAssignmentTreeId = "PendingAssignments";
+
+    // One Label/Bitmap per Explorer node. Each one describes the tree it sits under, so all three are
+    // driven independently rather than all mirroring the material picker.
+    internal const string MaterialLabelId = "lbl_MaterialDisplay";
+    internal const string AssignmentLabelId = "lbl_MaterialDisplay1";
+    internal const string PendingLabelId = "lbl_MaterialDisplay2";
+
+    /// <summary>What a material label shows when its tree has nothing selected. The blocks are designed
+    /// with the placeholder text "XX_MaterialName", which would otherwise sit there looking like data.</summary>
+    private const string NoMaterialLabel = "(no material selected)";
+
+    // Column ids. Both trees in the .dlx have ShowHeader/ShowMultipleColumns true but declare no columns at
+    // design time, so these are created at runtime in SetUpColumns.
+    private static class MaterialColumn
+    {
+        public const int Name = 0;
+        public const int Detail = 1;
+        public const int Density = 2;
+    }
+
+    private static class AssignmentColumn
+    {
+        public const int Name = 0;
+        public const int Count = 1;
+        public const int DisplayMaterial = 2;
+    }
+
+    private static class PendingColumn
+    {
+        public const int Name = 0;
+        public const int Kind = 1;
+        public const int Status = 2;
+    }
+
+    // NX color indices used to code pending rows. 186 reads as red and 36 as amber in the default palette.
+    private const int BlockedColor = 186;
+    private const int NeedsConfirmationColor = 36;
 
     private readonly BlockDialog _dialog;
+    private readonly BodyResolver _bodyResolver;
     private readonly Action<string>? _logWarning;
 
-    /// <param name="logWarning">Warning sink — takes a plain delegate rather than a concrete NX logger
-    /// so this class stays independent of the session context, matching the same seam
-    /// <c>FileSystemMaterialLibraryRepository</c> uses. Callers typically pass <c>context.Log.Warn</c>.</param>
-    public BlockAccessor(BlockDialog dialog, Action<string>? logWarning = null)
+    private SelectObject? _selectedBodies;
+    private Enumeration? _libraryEnum;
+    private Tree? _materialTree;
+    private Tree? _currentAssignmentTree;
+    private Tree? _pendingAssignmentTree;
+    private Label? _materialLabel;
+    private Label? _assignmentLabel;
+    private Label? _pendingLabel;
+
+    private TreeBinding<Material>? _materials;
+    private TreeBinding<AssignmentRowRef>? _assignments;
+    private TreeBinding<PendingRowRef>? _pending;
+
+    private IReadOnlyList<MaterialLibraryReference> _lastPopulatedLibraries = Array.Empty<MaterialLibraryReference>();
+
+    /// <param name="bodyResolver">Maps <see cref="BodyId"/> to the live NXOpen <see cref="Body"/> and back, so
+    /// the selection block can be read and written in domain terms. Shared with
+    /// <c>PartMaterialService</c> — it is refreshed before every write here, since the cache is only valid
+    /// for the scan that filled it.</param>
+    /// <param name="logWarning">Warning sink — a plain delegate rather than a concrete NX logger so this class
+    /// stays independent of the session context. Callers typically pass <c>context.Log.Warn</c>.</param>
+    public BlockAccessor(BlockDialog dialog, BodyResolver bodyResolver, Action<string>? logWarning = null)
     {
         _dialog = dialog;
+        _bodyResolver = bodyResolver;
         _logWarning = logWarning;
     }
 
-    // ---- Library dropdown ----
+    // ---- Lifecycle ----
 
-    public void PopulateLibraryDropdown(IReadOnlyList<MaterialLibraryReference> libraries)
+    /// <summary>Resolves every block and registers the tree callbacks. Called from <c>initialize_cb</c>,
+    /// which is where the NX samples resolve blocks.</summary>
+    public void Initialize(ITreeInteractionSink sink)
     {
-        // VERIFY: exact dropdown/enum-list block API — candidate is a PropertyList-backed
-        // "ListItems"/"Options" write, mirroring the PropertyList.GetDouble/GetString pattern shown in
-        // Skills/with-block-ui.md §3.
-        var properties = _dialog.GetBlock(LibraryDropdownId).GetProperties();
-        properties.SetStringArray("ListItems", libraries.Select(l => l.DisplayName).ToArray());
-        LastPopulatedLibraries = libraries;
+        _selectedBodies = TryFindBlock<SelectObject>(SelectedBodiesId);
+        _libraryEnum = TryFindBlock<Enumeration>(LibraryEnumId);
+        _materialTree = TryFindBlock<Tree>(MaterialTreeId);
+        _currentAssignmentTree = TryFindBlock<Tree>(CurrentAssignmentTreeId);
+        _pendingAssignmentTree = TryFindBlock<Tree>(PendingAssignmentTreeId);
+        _materialLabel = TryFindBlock<Label>(MaterialLabelId);
+        _assignmentLabel = TryFindBlock<Label>(AssignmentLabelId);
+        _pendingLabel = TryFindBlock<Label>(PendingLabelId);
+
+        if (_materialTree is not null)
+        {
+            _materials = new TreeBinding<Material>(_materialTree);
+            _materialTree.SetOnSelectHandler((_, node, _, selected) =>
+                sink.OnMaterialSelected(selected ? _materials!.Resolve(node) : null));
+            _materialTree.SetOnPreSelectHandler((_, node, _, _) =>
+                sink.OnMaterialHovered(_materials!.Resolve(node)));
+            _materialTree.SetToolTipTextHandler((_, node, _) =>
+            {
+                var material = _materials!.Resolve(node);
+                return material is null ? string.Empty : sink.OnMaterialTooltip(material);
+            });
+            _materialTree.SetOnDefaultActionHandler((_, node, _) =>
+            {
+                var material = _materials!.Resolve(node);
+                if (material is not null)
+                    sink.OnMaterialDefaultAction(material);
+            });
+            _materialTree.SetOnMenuHandler((tree, node, _) =>
+                ShowMenu(tree, sink.BuildMaterialMenu(_materials!.Resolve(node))));
+            _materialTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
+                sink.OnMaterialMenuCommand(menuItemId, _materials!.ResolveSelectedOr(node)));
+
+            // Hover drives the thumbnail, so it needs a dwell long enough not to thrash the Label while the
+            // pointer crosses the tree, but short enough to feel immediate.
+            _materialTree.SetPreSelectionTimeOut(250.0);
+        }
+
+        if (_currentAssignmentTree is not null)
+        {
+            _assignments = new TreeBinding<AssignmentRowRef>(_currentAssignmentTree);
+            _currentAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
+                sink.OnAssignmentSelected(selected ? _assignments!.Resolve(node) : null));
+            _currentAssignmentTree.SetOnMenuHandler((tree, node, _) =>
+                ShowMenu(tree, sink.BuildAssignmentMenu(_assignments!.Resolve(node))));
+            _currentAssignmentTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
+                sink.OnAssignmentMenuCommand(menuItemId, _assignments!.ResolveSelectedOr(node)));
+        }
+
+        if (_pendingAssignmentTree is not null)
+        {
+            _pending = new TreeBinding<PendingRowRef>(_pendingAssignmentTree);
+            _pendingAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
+                sink.OnPendingSelected(selected ? _pending!.Resolve(node) : null));
+            _pendingAssignmentTree.SetOnMenuHandler((tree, node, _) =>
+                ShowMenu(tree, sink.BuildPendingMenu(_pending!.Resolve(node))));
+            _pendingAssignmentTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
+                sink.OnPendingMenuCommand(menuItemId, _pending!.ResolveSelectedOr(node)));
+        }
     }
 
-    private IReadOnlyList<MaterialLibraryReference>? LastPopulatedLibraries { get; set; }
-
-    /// <summary>Maps the selected row back to the library it was populated from. Deliberately not built
-    /// by wrapping the block's selected text in a <see cref="MaterialLibraryId"/> — display name and id
-    /// are separate fields, and only happen to coincide for the filesystem repository.</summary>
-    public MaterialLibraryId? GetSelectedLibraryId()
+    /// <summary>Creates the tree columns. Must run from <c>dialogShown_cb</c>, not <c>initialize_cb</c> —
+    /// the NX TreeListDemo sample is explicit that columns inserted earlier do not take.</summary>
+    public void SetUpColumns()
     {
-        if (LastPopulatedLibraries is null)
-            return null;
+        InsertColumns(_materialTree,
+            (MaterialColumn.Name, "Material", 220),
+            (MaterialColumn.Detail, "Description", 160),
+            (MaterialColumn.Density, "Density", 90));
 
-        var properties = _dialog.GetBlock(LibraryDropdownId).GetProperties();
-        var index = properties.GetInt("SelectedIndex");
-        return index >= 0 && index < LastPopulatedLibraries.Count
-            ? LastPopulatedLibraries[index].Id
-            : null;
+        InsertColumns(_currentAssignmentTree,
+            (AssignmentColumn.Name, "Material / Body", 220),
+            (AssignmentColumn.Count, "Bodies / Kind", 110),
+            (AssignmentColumn.DisplayMaterial, "Display material", 140));
+
+        InsertColumns(_pendingAssignmentTree,
+            (PendingColumn.Name, "Material / Body", 220),
+            (PendingColumn.Kind, "Kind", 90),
+            (PendingColumn.Status, "Status", 260));
     }
 
-    // ---- Material browser: category dropdown + material list ----
-
-    public void PopulateCategoryDropdown(IReadOnlyList<MaterialTab> tabs)
+    private static void InsertColumns(Tree? tree, params (int Id, string Title, int Width)[] columns)
     {
-        var properties = _dialog.GetBlock(CategoryDropdownId).GetProperties();
-        properties.SetStringArray("ListItems", tabs.Select(t => t.Category.DisplayName).ToArray());
-        properties.SetInt("SelectedIndex", tabs.Count > 0 ? 0 : -1);
-    }
-
-    public int GetSelectedCategoryIndex()
-    {
-        var properties = _dialog.GetBlock(CategoryDropdownId).GetProperties();
-        return properties.GetInt("SelectedIndex");
-    }
-
-    public void PopulateMaterialList(IReadOnlyList<Material> materials)
-    {
-        var properties = _dialog.GetBlock(MaterialListId).GetProperties();
-        properties.SetStringArray("ListItems", materials.Select(m => m.Name).ToArray());
-        properties.SetInt("SelectedIndex", -1);
-        LastPopulatedMaterials = materials;
-    }
-
-    private IReadOnlyList<Material>? LastPopulatedMaterials { get; set; }
-
-    public MaterialId? GetSelectedMaterialId()
-    {
-        if (LastPopulatedMaterials is null)
-            return null;
-
-        var properties = _dialog.GetBlock(MaterialListId).GetProperties();
-        var index = properties.GetInt("SelectedIndex");
-        return index >= 0 && index < LastPopulatedMaterials.Count
-            ? LastPopulatedMaterials[index].Id
-            : null;
-    }
-
-    /// <summary>Seam for the richer view: one tab page per <see cref="MaterialTab.Category"/> and, within
-    /// each tab, one thumbnail+name tile per <see cref="Material"/>. Dynamically creating a variable
-    /// number of tab pages and tiles is the single biggest open risk in this design (Block UI Styler
-    /// layouts are normally a fixed, designer-placed set of blocks), so it needs a spike on an
-    /// NX-installed machine to pick an approach — true dynamic block instancing vs. a fixed hidden-block
-    /// template vs. hosting a native .NET control.
-    ///
-    /// A no-op until then, not a throw: the category dropdown and material list above already give the
-    /// user a working picker off the same <see cref="MaterialTab"/> data, so failing here would take down
-    /// a dialog that is otherwise fully functional.</summary>
-    public void PopulateMaterialTabs(IReadOnlyList<MaterialTab> tabs) =>
-        _logWarning?.Invoke(
-            $"Tabbed material tile grid not implemented (pending NX-install spike) — {tabs.Count} " +
-            "category tab(s) not rendered; using the category dropdown and material list instead.");
-
-    public void ShowMaterialProperties(Material material)
-    {
-        // VERIFY: exact read-only rows/grid block API for the property preview panel.
-        var properties = _dialog.GetBlock(MaterialPropertyPanelId).GetProperties();
-        var rows = material.Properties
-            .Select(p => $"{p.Name}: {p.AsString()}{(string.IsNullOrEmpty(p.Unit) ? "" : $" {p.Unit}")}")
-            .ToArray();
-        properties.SetStringArray("Rows", rows);
-    }
-
-    // ---- Material usage table + body drill-down ----
-
-    public void PopulateMaterialUsageTable(IReadOnlyList<MaterialUsageRow> rows)
-    {
-        // VERIFY: exact table/grid block API — candidate is a two-column string-array write (label, count).
-        var properties = _dialog.GetBlock(MaterialUsageTableId).GetProperties();
-        properties.SetStringArray("Column0", rows.Select(r => r.MaterialLabel).ToArray());
-        properties.SetStringArray("Column1", rows.Select(r => r.BodyCount.ToString()).ToArray());
-    }
-
-    public MaterialUsageRow? GetSelectedMaterialUsageRow()
-    {
-        // VERIFY: exact "selected row index" read — the row itself is re-derived by the presenter (which
-        // holds the last-populated MaterialUsageRow[] it can index into), not reconstructed from the block.
-        var properties = _dialog.GetBlock(MaterialUsageTableId).GetProperties();
-        var index = properties.GetInt("SelectedRow");
-        return index < 0 ? null : LastPopulatedUsageRows?.ElementAtOrDefault(index);
-    }
-
-    /// <summary>Set by the presenter immediately after <see cref="PopulateMaterialUsageTable"/>, so
-    /// <see cref="GetSelectedMaterialUsageRow"/> can map a selected row index back to data without this
-    /// class needing to parse it back out of block text.</summary>
-    public IReadOnlyList<MaterialUsageRow>? LastPopulatedUsageRows { get; set; }
-
-    public void PopulateBodyDrilldownList(IReadOnlyList<BodyInfo> bodies)
-    {
-        var properties = _dialog.GetBlock(BodyDrilldownListId).GetProperties();
-        properties.SetStringArray("ListItems", bodies.Select(b => $"{b.Name} [{b.Kind}] ({b.Id})").ToArray());
-
-        // Clear selection before swapping the backing list: indices left over from the previously shown
-        // set would otherwise resolve against the new one, letting Apply/Remove hit bodies the user never
-        // picked — possibly under a different material row entirely.
-        properties.SetIntArray("SelectedIndices", Array.Empty<int>());
-        LastPopulatedDrilldownBodies = bodies;
-    }
-
-    /// <summary>Same pattern as <see cref="LastPopulatedUsageRows"/> — the presenter's last-populated list,
-    /// used to map selected list-box indices back to <see cref="BodyId"/>s.</summary>
-    public IReadOnlyList<BodyInfo>? LastPopulatedDrilldownBodies { get; private set; }
-
-    public IReadOnlyList<BodyId> GetSelectedDrilldownBodyIds()
-    {
-        if (LastPopulatedDrilldownBodies is null)
-            return Array.Empty<BodyId>();
-
-        // VERIFY: exact multi-select list-box "selected indices" read.
-        var properties = _dialog.GetBlock(BodyDrilldownListId).GetProperties();
-        var indices = properties.GetIntArray("SelectedIndices") ?? Array.Empty<int>();
-        return indices
-            .Where(i => i >= 0 && i < LastPopulatedDrilldownBodies.Count)
-            .Select(i => LastPopulatedDrilldownBodies[i].Id)
-            .ToList();
-    }
-
-    public void SelectAllVisibleDrilldownBodies()
-    {
-        if (LastPopulatedDrilldownBodies is null)
+        if (tree is null)
             return;
 
-        // VERIFY: exact multi-select list-box "select these indices" write.
-        var properties = _dialog.GetBlock(BodyDrilldownListId).GetProperties();
-        properties.SetIntArray("SelectedIndices", Enumerable.Range(0, LastPopulatedDrilldownBodies.Count).ToArray());
+        foreach (var (id, title, width) in columns)
+        {
+            tree.InsertColumn(id, title, width);
+            tree.SetColumnResizePolicy(id, Tree.ColumnResizePolicy.ConstantWidth);
+        }
     }
 
-    public void SetBodyKindFilter(BodyKind? filter)
+    // ---- Library enumeration ----
+
+    public void PopulateLibraryEnum(IReadOnlyList<MaterialLibraryReference> libraries)
     {
-        var properties = _dialog.GetBlock(BodyKindFilterId).GetProperties();
-        properties.SetString("SelectedValue", filter?.ToString() ?? "All");
+        _lastPopulatedLibraries = libraries;
+        if (_libraryEnum is null)
+            return;
+
+        var properties = _libraryEnum.GetProperties();
+        try
+        {
+            properties.SetEnumMembers("Value", libraries.Select(l => l.DisplayName).ToArray());
+            if (libraries.Count > 0)
+                properties.SetEnum("Value", 0);
+        }
+        finally
+        {
+            properties.Dispose();
+        }
     }
 
-    public BodyKind? GetBodyKindFilter()
+    /// <summary>Maps the selected entry back to the library it was populated from. Deliberately not built by
+    /// wrapping the block's selected text in a <see cref="MaterialLibraryId"/> — display name and id are
+    /// separate fields, and only happen to coincide for the filesystem repository.</summary>
+    public MaterialLibraryId? GetSelectedLibraryId()
     {
-        var properties = _dialog.GetBlock(BodyKindFilterId).GetProperties();
-        var selected = properties.GetString("SelectedValue");
-        return Enum.TryParse<BodyKind>(selected, out var kind) ? kind : null;
+        if (_libraryEnum is null || _lastPopulatedLibraries.Count == 0)
+            return null;
+
+        var properties = _libraryEnum.GetProperties();
+        try
+        {
+            var index = properties.GetEnum("Value");
+            return index >= 0 && index < _lastPopulatedLibraries.Count
+                ? _lastPopulatedLibraries[index].Id
+                : null;
+        }
+        finally
+        {
+            properties.Dispose();
+        }
     }
 
-    // ---- Plan review / confirmation ----
+    // ---- Material tree ----
 
-    public void ShowPlanSummary(AssignmentPlan plan)
+    public void PopulateMaterialTree(IReadOnlyList<MaterialCategoryNode> roots)
     {
-        // VERIFY: exact read-only text/list block API for blocking/confirmation/warning messages.
-        var properties = _dialog.GetBlock(PlanSummaryId).GetProperties();
-        var lines = plan.BodyEvaluations
-            .SelectMany(evaluation => evaluation.RuleOutcomes
-                .Where(o => o.Message is not null)
-                .Select(o => $"[{evaluation.BodyId}] {o.Decision}: {o.Message}"))
-            .ToArray();
-        properties.SetStringArray("Rows", lines);
-        LastPlan = plan;
+        if (_materials is null)
+            return;
+
+        _materials.Rebuild(() =>
+        {
+            foreach (var root in roots)
+                AddCategory(root, parent: null);
+        });
     }
 
-    private AssignmentPlan? LastPlan { get; set; }
-
-    /// <summary>Asks the user to confirm the bodies whose rules returned RequireConfirmation — chiefly
-    /// reassignment over an existing material, and coating display-material mismatches.
-    ///
-    /// All-or-nothing, driven by the plan last passed to <see cref="ShowPlanSummary"/>, because Block UI
-    /// Styler has no per-row checkbox control to hang a per-body answer off. The finalizer's per-body
-    /// partial-apply handling is untouched, so a real per-body control can replace this later without
-    /// changing anything downstream. Returning an empty set on decline skips those bodies; the rest of
-    /// the plan still applies.</summary>
-    public HashSet<BodyId> GetConfirmedBodyIds()
+    private void AddCategory(MaterialCategoryNode category, Node? parent)
     {
-        var needingConfirmation = LastPlan?.BodyEvaluations.Where(e => e.RequiresConfirmation).ToList();
-        if (needingConfirmation is null || needingConfirmation.Count == 0)
-            return new HashSet<BodyId>();
+        // Category rows map to no domain value on purpose: they are structure, and selecting one should not
+        // look like selecting a material.
+        var node = _materials!.Add(category.DisplayName, value: null, parent);
 
-        var details = needingConfirmation.SelectMany(evaluation => evaluation.ConfirmationOutcomes
-            .Select(outcome => $"  [{evaluation.BodyId}] {outcome.Message}"));
-        var message =
-            $"{needingConfirmation.Count} body(ies) need confirmation:{Environment.NewLine}" +
-            string.Join(Environment.NewLine, details) +
-            $"{Environment.NewLine}{Environment.NewLine}Apply to all of them?";
+        foreach (var child in category.Children)
+            AddCategory(child, node);
 
-        return Confirm(message)
-            ? needingConfirmation.Select(e => e.BodyId).ToHashSet()
-            : new HashSet<BodyId>();
+        foreach (var material in category.Materials)
+        {
+            var materialNode = _materials.Add(material.Name, material, node);
+            materialNode.SetColumnDisplayText(MaterialColumn.Detail, material.Description ?? string.Empty);
+            materialNode.SetColumnDisplayText(MaterialColumn.Density, DensityText(material));
+        }
+    }
+
+    public Material? GetSelectedMaterial() => _materials?.ResolveSelected().FirstOrDefault();
+
+    /// <summary>The density row, if the material has one. MatML property names vary between libraries, so this
+    /// matches on the name containing "density" rather than on an exact id, and falls back to blank — the
+    /// column is a convenience, never something a decision depends on.</summary>
+    private static string DensityText(Material material)
+    {
+        var density = material.Properties
+            .FirstOrDefault(p => p.Name.IndexOf("density", StringComparison.OrdinalIgnoreCase) >= 0);
+
+        if (density is null)
+            return string.Empty;
+
+        return string.IsNullOrWhiteSpace(density.Unit)
+            ? density.AsString()
+            : $"{density.AsString()} {density.Unit}";
+    }
+
+    // ---- Material labels, one per Explorer node ----
+    //
+    // Each label names whatever its own tree currently has selected. Only the title text is written: the
+    // blocks are Label/Bitmap, but Bitmap takes an absolute file path and there is no agreed location for
+    // material thumbnails yet, so it is left alone rather than pointed at a guessed path.
+
+    public void SetMaterialLabel(Material? material) => SetLabelText(_materialLabel, material?.Name);
+
+    public void SetAssignmentLabel(AssignmentRowRef? row) => SetLabelText(_assignmentLabel, row?.Row.MaterialLabel);
+
+    public void SetPendingLabel(PendingRowRef? row) => SetLabelText(_pendingLabel, row?.Entry.Material.Name);
+
+    private static void SetLabelText(Label? label, string? text)
+    {
+        if (label is null)
+            return;
+
+        var properties = label.GetProperties();
+        try
+        {
+            properties.SetString("Label", string.IsNullOrWhiteSpace(text) ? NoMaterialLabel : text);
+        }
+        finally
+        {
+            properties.Dispose();
+        }
+    }
+
+    // ---- Current assignment tree ----
+
+    public void PopulateCurrentAssignmentTree(IReadOnlyList<AssignmentRowRef> groups)
+    {
+        if (_assignments is null)
+            return;
+
+        _assignments.Rebuild(() =>
+        {
+            foreach (var group in groups)
+            {
+                var node = _assignments.Add(group.Row.MaterialLabel, group, parent: null);
+                node.SetColumnDisplayText(AssignmentColumn.Count, group.Row.BodyCount.ToString());
+
+                foreach (var body in group.Bodies)
+                {
+                    var bodyNode = _assignments.Add(body.Name, AssignmentRowRef.ForBody(group.Row, body), node);
+                    bodyNode.SetColumnDisplayText(AssignmentColumn.Count, body.Kind.ToString());
+                    bodyNode.SetColumnDisplayText(AssignmentColumn.DisplayMaterial, DisplayMaterialText(body));
+                }
+            }
+        });
+    }
+
+    /// <summary>Set by the presenter alongside the tree population so the display-material column can be
+    /// filled without this class re-querying the part.</summary>
+    public IReadOnlyDictionary<BodyId, BodyMaterialAssignment> CurrentAssignments { get; set; } =
+        new Dictionary<BodyId, BodyMaterialAssignment>();
+
+    private string DisplayMaterialText(BodyInfo body) =>
+        CurrentAssignments.TryGetValue(body.Id, out var assignment)
+            ? assignment.CurrentDisplayMaterial?.Name ?? string.Empty
+            : string.Empty;
+
+    // ---- Pending assignment tree ----
+
+    public void PopulatePendingTree(IReadOnlyList<PendingAssignmentEntry> entries)
+    {
+        if (_pending is null)
+            return;
+
+        _pending.Rebuild(() =>
+        {
+            foreach (var entry in entries)
+            {
+                var node = _pending.Add(entry.Material.Name, new PendingRowRef(entry, null), parent: null);
+                node.SetColumnDisplayText(PendingColumn.Kind, entry.Rows.Count.ToString());
+
+                foreach (var row in entry.Rows)
+                {
+                    var bodyNode = _pending.Add(row.Body.Name, new PendingRowRef(entry, row), node);
+                    bodyNode.SetColumnDisplayText(PendingColumn.Kind, row.Body.Kind.ToString());
+                    bodyNode.SetColumnDisplayText(PendingColumn.Status, StatusText(row));
+
+                    if (row.Status == PendingBodyStatus.Blocked)
+                        bodyNode.ForegroundColor = BlockedColor;
+                    else if (row.Status == PendingBodyStatus.NeedsConfirmation)
+                        bodyNode.ForegroundColor = NeedsConfirmationColor;
+                }
+            }
+        });
+    }
+
+    private static string StatusText(PendingBodyRow row)
+    {
+        var label = row.Status switch
+        {
+            PendingBodyStatus.Blocked => "Blocked",
+            PendingBodyStatus.NeedsConfirmation => "Needs confirmation",
+            _ => "OK",
+        };
+
+        return string.IsNullOrWhiteSpace(row.Message) ? label : $"{label} — {row.Message}";
+    }
+
+    // ---- Body selection block ----
+
+    public IReadOnlyList<BodyId> GetSelectedBodyIds()
+    {
+        if (_selectedBodies is null)
+            return Array.Empty<BodyId>();
+
+        var properties = _selectedBodies.GetProperties();
+        try
+        {
+            var selected = properties.GetTaggedObjectVector("SelectedObjects");
+            if (selected is null)
+                return Array.Empty<BodyId>();
+
+            // The block is scoped to bodies, but filter anyway rather than cast — a non-Body slipping through
+            // should drop out, not throw inside a callback.
+            return selected.OfType<Body>().Select(BodyResolver.GetBodyId).ToList();
+        }
+        finally
+        {
+            properties.Dispose();
+        }
+    }
+
+    public void SetSelectedBodies(IReadOnlyList<BodyId> bodyIds)
+    {
+        if (_selectedBodies is null)
+            return;
+
+        // The resolver's cache is only valid for the scan that filled it, and this can be driven from a quick
+        // -select button at any point in the dialog's life, so rescan before mapping.
+        _bodyResolver.Refresh();
+
+        var bodies = new List<TaggedObject>();
+        foreach (var id in bodyIds)
+        {
+            if (_bodyResolver.TryResolve(id, out var body))
+                bodies.Add(body);
+        }
+
+        var properties = _selectedBodies.GetProperties();
+        try
+        {
+            properties.SetTaggedObjectVector("SelectedObjects", bodies.ToArray());
+        }
+        finally
+        {
+            properties.Dispose();
+        }
+    }
+
+    // ---- Menus ----
+
+    private static void ShowMenu(Tree tree, IReadOnlyList<TreeMenuItem> items)
+    {
+        if (items.Count == 0)
+            return;
+
+        var menu = tree.CreateMenu();
+        try
+        {
+            foreach (var item in items)
+            {
+                if (item.IsSeparator)
+                {
+                    menu.AddSeparator();
+                    continue;
+                }
+
+                menu.AddMenuItem(item.Id, item.Text);
+                if (!item.Enabled)
+                    menu.SetItemDisable(item.Id, true);
+            }
+
+            tree.SetMenu(menu);
+        }
+        finally
+        {
+            // Only ever after SetMenu — the tree takes its copy there.
+            menu.Dispose();
+        }
+    }
+
+    // ---- Block lookup ----
+
+    /// <summary>Resolves a block, returning null and warning once rather than throwing when it is absent.
+    /// Two of this dialog's blocks are still to be added in the Styler, and a missing one should disable the
+    /// feature that needs it, not prevent the dialog from opening.</summary>
+    private T? TryFindBlock<T>(string blockId) where T : class
+    {
+        try
+        {
+            var block = _dialog.TopBlock.FindBlock(blockId) as T;
+            if (block is null)
+                _logWarning?.Invoke($"Dialog block '{blockId}' is missing or is not a {typeof(T).Name}; the features that use it are disabled.");
+
+            return block;
+        }
+        catch (Exception ex)
+        {
+            _logWarning?.Invoke($"Dialog block '{blockId}' could not be resolved ({ex.Message}); the features that use it are disabled.");
+            return null;
+        }
     }
 
     // ---- Generic dialogs ----
-    // Forwards to the shared NxOpen.Foundation.NxAdapters.NxMessageBoxHelper — these three have no
-    // dependency on this dialog's blocks or domain types, so the implementation lives once in the
-    // foundation instead of being duplicated per project (see area A of the reuse plan).
+    // Forwards to the shared NxOpen.Foundation.NxAdapters.NxMessageBoxHelper — these three have no dependency
+    // on this dialog's blocks or domain types, so the implementation lives once in the foundation instead of
+    // being duplicated per project.
 
     public bool Confirm(string message) => NxMessageBoxHelper.Confirm(message);
 
