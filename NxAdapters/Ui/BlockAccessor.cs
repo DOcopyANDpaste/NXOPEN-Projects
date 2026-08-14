@@ -165,24 +165,27 @@ public sealed class BlockAccessor
             Trace("Initialize: wiring materialTree callbacks");
             _materials = new TreeBinding<Material>(_materialTree);
             _materialTree.SetOnSelectHandler((_, node, _, selected) =>
-                sink.OnMaterialSelected(selected ? _materials!.Resolve(node) : null));
+                Safe("materialTree.OnSelect", () => sink.OnMaterialSelected(selected ? _materials!.Resolve(node) : null)));
             _materialTree.SetOnPreSelectHandler((_, node, _, _) =>
-                sink.OnMaterialHovered(_materials!.Resolve(node)));
+                Safe("materialTree.OnPreSelect", () => sink.OnMaterialHovered(_materials!.Resolve(node))));
             _materialTree.SetToolTipTextHandler((_, node, _) =>
-            {
-                var material = _materials!.Resolve(node);
-                return material is null ? string.Empty : sink.OnMaterialTooltip(material);
-            });
+                SafeFunc("materialTree.ToolTipText", () =>
+                {
+                    var material = _materials!.Resolve(node);
+                    return material is null ? string.Empty : sink.OnMaterialTooltip(material);
+                }, fallback: string.Empty));
             _materialTree.SetOnDefaultActionHandler((_, node, _) =>
-            {
-                var material = _materials!.Resolve(node);
-                if (material is not null)
-                    sink.OnMaterialDefaultAction(material);
-            });
+                Safe("materialTree.OnDefaultAction", () =>
+                {
+                    var material = _materials!.Resolve(node);
+                    if (material is not null)
+                        sink.OnMaterialDefaultAction(material);
+                }));
             _materialTree.SetOnMenuHandler((tree, node, _) =>
-                ShowMenu(tree, sink.BuildMaterialMenu(_materials!.Resolve(node))));
+                Safe("materialTree.OnMenu", () => ShowMenu(tree, sink.BuildMaterialMenu(_materials!.Resolve(node)))));
             _materialTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
-                sink.OnMaterialMenuCommand(menuItemId, _materials!.ResolveSelectedOr(node)));
+                Safe("materialTree.OnMenuSelection", () =>
+                    sink.OnMaterialMenuCommand(menuItemId, _materials!.ResolveSelectedOr(node))));
         }
 
         if (_currentAssignmentTree is not null)
@@ -190,11 +193,13 @@ public sealed class BlockAccessor
             Trace("Initialize: wiring currentAssignmentTree callbacks");
             _assignments = new TreeBinding<AssignmentRowRef>(_currentAssignmentTree);
             _currentAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
-                sink.OnAssignmentSelected(selected ? _assignments!.Resolve(node) : null));
+                Safe("currentAssignmentTree.OnSelect", () =>
+                    sink.OnAssignmentSelected(selected ? _assignments!.Resolve(node) : null)));
             _currentAssignmentTree.SetOnMenuHandler((tree, node, _) =>
-                ShowMenu(tree, sink.BuildAssignmentMenu(_assignments!.Resolve(node))));
+                Safe("currentAssignmentTree.OnMenu", () => ShowMenu(tree, sink.BuildAssignmentMenu(_assignments!.Resolve(node)))));
             _currentAssignmentTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
-                sink.OnAssignmentMenuCommand(menuItemId, _assignments!.ResolveSelectedOr(node)));
+                Safe("currentAssignmentTree.OnMenuSelection", () =>
+                    sink.OnAssignmentMenuCommand(menuItemId, _assignments!.ResolveSelectedOr(node))));
         }
 
         if (_pendingAssignmentTree is not null)
@@ -202,30 +207,52 @@ public sealed class BlockAccessor
             Trace("Initialize: wiring pendingAssignmentTree callbacks");
             _pending = new TreeBinding<PendingRowRef>(_pendingAssignmentTree);
             _pendingAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
-                sink.OnPendingSelected(selected ? _pending!.Resolve(node) : null));
+                Safe("pendingAssignmentTree.OnSelect", () =>
+                    sink.OnPendingSelected(selected ? _pending!.Resolve(node) : null)));
             _pendingAssignmentTree.SetOnMenuHandler((tree, node, _) =>
-                ShowMenu(tree, sink.BuildPendingMenu(_pending!.Resolve(node))));
+                Safe("pendingAssignmentTree.OnMenu", () => ShowMenu(tree, sink.BuildPendingMenu(_pending!.Resolve(node)))));
             _pendingAssignmentTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
-                sink.OnPendingMenuCommand(menuItemId, _pending!.ResolveSelectedOr(node)));
+                Safe("pendingAssignmentTree.OnMenuSelection", () =>
+                    sink.OnPendingMenuCommand(menuItemId, _pending!.ResolveSelectedOr(node))));
         }
 
         Trace("Initialize: done");
     }
 
-    /// <summary>Ensures the currently-active Explorer node's tree has its columns (and, for the material
-    /// tree, its preselect timeout) set up. Must run from <c>dialogShown_cb</c>, not <c>initialize_cb</c> —
-    /// the NX TreeListDemo sample is explicit that columns inserted earlier do not take, and the same
-    /// construction timing applies to <see cref="Tree.SetPreSelectionTimeOut"/> (calling either from
-    /// <c>initialize_cb</c> throws "operation performed during construction or destruction of the tree").
-    ///
-    /// <c>explorerNode_Material</c>, <c>explorerNode_Current</c> and <c>ExploreNodePending</c> are
-    /// WizardGroup pages: only the page that is current has its child controls constructed, and — confirmed
-    /// empirically — <c>dialogShown_cb</c> fires again every time the user switches Explorer node, not just
-    /// once at dialog open. So this only ever touches <see cref="Explorer.CurrentNode"/>'s own tree, and is
-    /// safe to call on every re-entry: <see cref="NodeState.ColumnsReady"/> makes the real work run exactly
-    /// once per node. Do NOT reintroduce cycling <c>CurrentNode</c> through the other pages here — forcing a
-    /// page change is itself what re-enters <c>dialogShown_cb</c>, which turned the previous attempt at this
-    /// into unbounded recursion.</summary>
+    //Safe call back throw, and report
+    private void Safe(string what, Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            ReportCallbackException(what, ex);
+        }
+    }
+
+    private T SafeFunc<T>(string what, Func<T> func, T fallback)
+    {
+        try
+        {
+            return func();
+        }
+        catch (Exception ex)
+        {
+            ReportCallbackException(what, ex);
+            return fallback;
+        }
+    }
+
+    private void ReportCallbackException(string what, Exception ex)
+    {
+        _logWarning?.Invoke($"EXCEPTION in {what}: {ex}");
+        NxMessageBoxHelper.ShowError(
+            $"An error occurred handling '{what}':{Environment.NewLine}{ex.Message}{Environment.NewLine}{Environment.NewLine}" +
+            "Full details were written to the Listing Window.");
+    }
+
     public void SetUpColumns()
     {
         if (_explorer is null)
@@ -242,8 +269,6 @@ public sealed class BlockAccessor
             case MaterialNode:
                 EnsureNodeColumns(_materialNodeState, "material", () =>
                 {
-                    // Hover drives the material thumbnail, so it needs a dwell long enough not to thrash the
-                    // Label while the pointer crosses the tree, but short enough to feel immediate.
                     _materialTree?.SetPreSelectionTimeOut(250.0);
                     InsertColumns(_materialTree,
                         (MaterialColumn.Name, "Material", 220),
@@ -274,8 +299,7 @@ public sealed class BlockAccessor
         }
     }
 
-    /// <summary>Runs <paramref name="setupColumns"/> once for a node's tree, then flushes whatever populate
-    /// call arrived earlier while the node wasn't ready yet.</summary>
+
     private void EnsureNodeColumns(NodeState state, string label, Action setupColumns)
     {
         if (state.ColumnsReady)
@@ -296,8 +320,6 @@ public sealed class BlockAccessor
         }
     }
 
-    /// <summary>Runs <paramref name="populate"/> now if the node is ready, otherwise remembers it (replacing
-    /// any earlier deferred call) to run the moment the node's columns are set up.</summary>
     private void RunOrDefer(NodeState state, Action populate)
     {
         if (state.ColumnsReady)
@@ -322,9 +344,6 @@ public sealed class BlockAccessor
         }
     }
 
-    /// <summary>Writes to the NX Listing Window via the same sink as warnings, so initialization can be
-    /// traced step by step when the exact call that throws needs to be pinned down. Temporary diagnostic
-    /// aid — safe to strip once the Explorer/tree construction-timing issue is confirmed fixed.</summary>
     private void Trace(string message) => _logWarning?.Invoke($"TRACE {message}");
 
     // ---- Library enumeration ----
@@ -348,9 +367,6 @@ public sealed class BlockAccessor
         }
     }
 
-    /// <summary>Maps the selected entry back to the library it was populated from. Deliberately not built by
-    /// wrapping the block's selected text in a <see cref="MaterialLibraryId"/> — display name and id are
-    /// separate fields, and only happen to coincide for the filesystem repository.</summary>
     public MaterialLibraryId? GetSelectedLibraryId()
     {
         if (_libraryEnum is null || _lastPopulatedLibraries.Count == 0)
@@ -403,14 +419,10 @@ public sealed class BlockAccessor
     }
 
     public Material? GetSelectedMaterial() => _materials?.ResolveSelected().FirstOrDefault();
-
-    /// <summary>The density row, if the material has one. MatML property names vary between libraries, so this
-    /// matches on the name containing "density" rather than on an exact id, and falls back to blank — the
-    /// column is a convenience, never something a decision depends on.</summary>
     private static string DensityText(Material material)
     {
         var density = material.Properties
-            .FirstOrDefault(p => p.Name.IndexOf("density", StringComparison.OrdinalIgnoreCase) >= 0);
+            .FirstOrDefault(p => p?.Name?.IndexOf("density", StringComparison.OrdinalIgnoreCase) >= 0);
 
         if (density is null)
             return string.Empty;
@@ -421,10 +433,6 @@ public sealed class BlockAccessor
     }
 
     // ---- Material labels, one per Explorer node ----
-    //
-    // Each label names whatever its own tree currently has selected. Only the title text is written: the
-    // blocks are Label/Bitmap, but Bitmap takes an absolute file path and there is no agreed location for
-    // material thumbnails yet, so it is left alone rather than pointed at a guessed path.
 
     public void SetMaterialLabel(Material? material) => SetLabelText(_materialLabel, material?.Name);
 
