@@ -45,6 +45,14 @@ public sealed class BlockAccessor
     internal const string MaterialTreeId = "MaterialTree";
     internal const string CurrentAssignmentTreeId = "CurrentAssignmentTree";
     internal const string PendingAssignmentTreeId = "PendingAssignments";
+    internal const string ExplorerId = "explorer";
+
+    // Explorer nodes are UGS::UI::Comp::WizardGroup pages, verbatim order from BlockUI.dlx. Each page's
+    // native controls are not constructed until the page becomes current, regardless of the .dlx-level
+    // Expanded="True" flag on every node.
+    private const int MaterialNode = 0;
+    private const int CurrentAssignmentNode = 1;
+    private const int PendingNode = 2;
 
     // One Label/Bitmap per Explorer node. Each one describes the tree it sits under, so all three are
     // driven independently rather than all mirroring the material picker.
@@ -89,6 +97,7 @@ public sealed class BlockAccessor
 
     private SelectObject? _selectedBodies;
     private Enumeration? _libraryEnum;
+    private Explorer? _explorer;
     private Tree? _materialTree;
     private Tree? _currentAssignmentTree;
     private Tree? _pendingAssignmentTree;
@@ -121,8 +130,11 @@ public sealed class BlockAccessor
     /// which is where the NX samples resolve blocks.</summary>
     public void Initialize(ITreeInteractionSink sink)
     {
+        Trace("Initialize: start");
+
         _selectedBodies = TryFindBlock<SelectObject>(SelectedBodiesId);
         _libraryEnum = TryFindBlock<Enumeration>(LibraryEnumId);
+        _explorer = TryFindBlock<Explorer>(ExplorerId);
         _materialTree = TryFindBlock<Tree>(MaterialTreeId);
         _currentAssignmentTree = TryFindBlock<Tree>(CurrentAssignmentTreeId);
         _pendingAssignmentTree = TryFindBlock<Tree>(PendingAssignmentTreeId);
@@ -130,8 +142,12 @@ public sealed class BlockAccessor
         _assignmentLabel = TryFindBlock<Label>(AssignmentLabelId);
         _pendingLabel = TryFindBlock<Label>(PendingLabelId);
 
+        Trace($"Initialize: resolved explorer={_explorer is not null} materialTree={_materialTree is not null} " +
+              $"currentTree={_currentAssignmentTree is not null} pendingTree={_pendingAssignmentTree is not null}");
+
         if (_materialTree is not null)
         {
+            Trace("Initialize: wiring materialTree callbacks");
             _materials = new TreeBinding<Material>(_materialTree);
             _materialTree.SetOnSelectHandler((_, node, _, selected) =>
                 sink.OnMaterialSelected(selected ? _materials!.Resolve(node) : null));
@@ -152,14 +168,11 @@ public sealed class BlockAccessor
                 ShowMenu(tree, sink.BuildMaterialMenu(_materials!.Resolve(node))));
             _materialTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
                 sink.OnMaterialMenuCommand(menuItemId, _materials!.ResolveSelectedOr(node)));
-
-            // Hover drives the thumbnail, so it needs a dwell long enough not to thrash the Label while the
-            // pointer crosses the tree, but short enough to feel immediate.
-            _materialTree.SetPreSelectionTimeOut(250.0);
         }
 
         if (_currentAssignmentTree is not null)
         {
+            Trace("Initialize: wiring currentAssignmentTree callbacks");
             _assignments = new TreeBinding<AssignmentRowRef>(_currentAssignmentTree);
             _currentAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
                 sink.OnAssignmentSelected(selected ? _assignments!.Resolve(node) : null));
@@ -171,6 +184,7 @@ public sealed class BlockAccessor
 
         if (_pendingAssignmentTree is not null)
         {
+            Trace("Initialize: wiring pendingAssignmentTree callbacks");
             _pending = new TreeBinding<PendingRowRef>(_pendingAssignmentTree);
             _pendingAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
                 sink.OnPendingSelected(selected ? _pending!.Resolve(node) : null));
@@ -179,39 +193,94 @@ public sealed class BlockAccessor
             _pendingAssignmentTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
                 sink.OnPendingMenuCommand(menuItemId, _pending!.ResolveSelectedOr(node)));
         }
+
+        Trace("Initialize: done");
     }
 
-    /// <summary>Creates the tree columns. Must run from <c>dialogShown_cb</c>, not <c>initialize_cb</c> —
-    /// the NX TreeListDemo sample is explicit that columns inserted earlier do not take.</summary>
+    /// <summary>Creates the tree columns and sets tree widget properties that require the native control to
+    /// already be constructed. Must run from <c>dialogShown_cb</c>, not <c>initialize_cb</c> — the NX
+    /// TreeListDemo sample is explicit that columns inserted earlier do not take, and the same construction
+    /// timing applies to <see cref="Tree.SetPreSelectionTimeOut"/> (calling it from <c>initialize_cb</c>
+    /// throws "operation performed during construction or destruction of the tree").
+    ///
+    /// That timing gate is per Explorer page, not just per dialog: <c>explorerNode_Material</c>,
+    /// <c>explorerNode_Current</c> and <c>ExploreNodePending</c> are WizardGroup pages, and only the page
+    /// that is current when the dialog opens has its child controls constructed — the other two trees throw
+    /// the same exception even from dialogShown_cb until their page has been visited at least once. Cycling
+    /// <see cref="Explorer.CurrentNode"/> through all three forces that construction, then restores whichever
+    /// page was current so the visible page doesn't change under the user.</summary>
     public void SetUpColumns()
     {
+        Trace("SetUpColumns: start");
+
+        if (_explorer is not null)
+        {
+            var openingNode = _explorer.CurrentNode;
+            Trace($"SetUpColumns: explorer opening node = {openingNode}");
+
+            Trace("SetUpColumns: explorer.CurrentNode -> MaterialNode");
+            _explorer.CurrentNode = MaterialNode;
+
+            Trace("SetUpColumns: explorer.CurrentNode -> CurrentAssignmentNode");
+            _explorer.CurrentNode = CurrentAssignmentNode;
+
+            Trace("SetUpColumns: explorer.CurrentNode -> PendingNode");
+            _explorer.CurrentNode = PendingNode;
+
+            Trace($"SetUpColumns: explorer.CurrentNode -> restore {openingNode}");
+            _explorer.CurrentNode = openingNode;
+        }
+        else
+        {
+            Trace("SetUpColumns: explorer block not resolved (null) — page cycling skipped");
+        }
+
+        // Hover drives the material thumbnail, so it needs a dwell long enough not to thrash the Label while
+        // the pointer crosses the tree, but short enough to feel immediate.
+        Trace("SetUpColumns: materialTree.SetPreSelectionTimeOut");
+        _materialTree?.SetPreSelectionTimeOut(250.0);
+
+        Trace("SetUpColumns: InsertColumns materialTree");
         InsertColumns(_materialTree,
             (MaterialColumn.Name, "Material", 220),
             (MaterialColumn.Detail, "Description", 160),
             (MaterialColumn.Density, "Density", 90));
 
+        Trace("SetUpColumns: InsertColumns currentAssignmentTree");
         InsertColumns(_currentAssignmentTree,
             (AssignmentColumn.Name, "Material / Body", 220),
             (AssignmentColumn.Count, "Bodies / Kind", 110),
             (AssignmentColumn.DisplayMaterial, "Display material", 140));
 
+        Trace("SetUpColumns: InsertColumns pendingAssignmentTree");
         InsertColumns(_pendingAssignmentTree,
             (PendingColumn.Name, "Material / Body", 220),
             (PendingColumn.Kind, "Kind", 90),
             (PendingColumn.Status, "Status", 260));
+
+        Trace("SetUpColumns: done");
     }
 
-    private static void InsertColumns(Tree? tree, params (int Id, string Title, int Width)[] columns)
+    private void InsertColumns(Tree? tree, params (int Id, string Title, int Width)[] columns)
     {
         if (tree is null)
+        {
+            Trace("InsertColumns: tree is null, skipping");
             return;
+        }
 
         foreach (var (id, title, width) in columns)
         {
+            Trace($"InsertColumns: column {id} ('{title}')");
             tree.InsertColumn(id, title, width);
             tree.SetColumnResizePolicy(id, Tree.ColumnResizePolicy.ConstantWidth);
         }
     }
+
+    /// <summary>Writes to the NX Listing Window via the same sink as warnings, so initialization can be
+    /// traced step by step when the exact call that throws needs to be pinned down. Temporary diagnostic
+    /// aid — safe to strip once the Explorer/tree construction-timing issue is confirmed fixed.</summary>
+    private void Trace(string message) => _logWarning?.Invoke($"TRACE {message}");
 
     // ---- Library enumeration ----
 

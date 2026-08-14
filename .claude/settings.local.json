@@ -6,7 +6,8 @@
       "Read(//c/Users/CYRNBB/source/repos/NxOpen.Foundation/**)",
       "Bash(dotnet --version)",
       "Bash(dotnet new *)",
-      "Bash(dotnet sln *)"
+      "Bash(dotnet sln *)",
+      "Bash(powershell -NoProfile -Command \"Get-ChildItem 'c:\\\\Users\\\\CYRNBB\\\\source\\\\repos\\\\NXOPEN Projects\\\\NxAdapters' -Recurse -Filter *.cs | Sort-Object LastWriteTime -Descending | Select-Object -First 8 FullName, LastWriteTime | Format-Table -AutoSize\")"
     ]
   }
 }
