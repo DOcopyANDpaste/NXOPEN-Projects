@@ -109,6 +109,21 @@ public sealed class BlockAccessor
     private TreeBinding<AssignmentRowRef>? _assignments;
     private TreeBinding<PendingRowRef>? _pending;
 
+    /// <summary>Per-Explorer-node construction state. <c>dialogShown_cb</c> fires again every time the user
+    /// switches Explorer node (confirmed empirically — SetUpColumns re-runs on every node change), so column
+    /// setup must be idempotent per node rather than a one-time dialog step. A tree's columns are only ever
+    /// touched once — the first time its node becomes current — and any populate call that arrives before
+    /// that point is remembered and replayed at that moment instead of running immediately.</summary>
+    private sealed class NodeState
+    {
+        public bool ColumnsReady;
+        public Action? PendingPopulate;
+    }
+
+    private readonly NodeState _materialNodeState = new();
+    private readonly NodeState _currentAssignmentNodeState = new();
+    private readonly NodeState _pendingNodeState = new();
+
     private IReadOnlyList<MaterialLibraryReference> _lastPopulatedLibraries = Array.Empty<MaterialLibraryReference>();
 
     /// <param name="bodyResolver">Maps <see cref="BodyId"/> to the live NXOpen <see cref="Body"/> and back, so
@@ -197,68 +212,98 @@ public sealed class BlockAccessor
         Trace("Initialize: done");
     }
 
-    /// <summary>Creates the tree columns and sets tree widget properties that require the native control to
-    /// already be constructed. Must run from <c>dialogShown_cb</c>, not <c>initialize_cb</c> — the NX
-    /// TreeListDemo sample is explicit that columns inserted earlier do not take, and the same construction
-    /// timing applies to <see cref="Tree.SetPreSelectionTimeOut"/> (calling it from <c>initialize_cb</c>
-    /// throws "operation performed during construction or destruction of the tree").
+    /// <summary>Ensures the currently-active Explorer node's tree has its columns (and, for the material
+    /// tree, its preselect timeout) set up. Must run from <c>dialogShown_cb</c>, not <c>initialize_cb</c> —
+    /// the NX TreeListDemo sample is explicit that columns inserted earlier do not take, and the same
+    /// construction timing applies to <see cref="Tree.SetPreSelectionTimeOut"/> (calling either from
+    /// <c>initialize_cb</c> throws "operation performed during construction or destruction of the tree").
     ///
-    /// That timing gate is per Explorer page, not just per dialog: <c>explorerNode_Material</c>,
-    /// <c>explorerNode_Current</c> and <c>ExploreNodePending</c> are WizardGroup pages, and only the page
-    /// that is current when the dialog opens has its child controls constructed — the other two trees throw
-    /// the same exception even from dialogShown_cb until their page has been visited at least once. Cycling
-    /// <see cref="Explorer.CurrentNode"/> through all three forces that construction, then restores whichever
-    /// page was current so the visible page doesn't change under the user.</summary>
+    /// <c>explorerNode_Material</c>, <c>explorerNode_Current</c> and <c>ExploreNodePending</c> are
+    /// WizardGroup pages: only the page that is current has its child controls constructed, and — confirmed
+    /// empirically — <c>dialogShown_cb</c> fires again every time the user switches Explorer node, not just
+    /// once at dialog open. So this only ever touches <see cref="Explorer.CurrentNode"/>'s own tree, and is
+    /// safe to call on every re-entry: <see cref="NodeState.ColumnsReady"/> makes the real work run exactly
+    /// once per node. Do NOT reintroduce cycling <c>CurrentNode</c> through the other pages here — forcing a
+    /// page change is itself what re-enters <c>dialogShown_cb</c>, which turned the previous attempt at this
+    /// into unbounded recursion.</summary>
     public void SetUpColumns()
     {
-        Trace("SetUpColumns: start");
-
-        if (_explorer is not null)
+        if (_explorer is null)
         {
-            var openingNode = _explorer.CurrentNode;
-            Trace($"SetUpColumns: explorer opening node = {openingNode}");
-
-            Trace("SetUpColumns: explorer.CurrentNode -> MaterialNode");
-            _explorer.CurrentNode = MaterialNode;
-
-            Trace("SetUpColumns: explorer.CurrentNode -> CurrentAssignmentNode");
-            _explorer.CurrentNode = CurrentAssignmentNode;
-
-            Trace("SetUpColumns: explorer.CurrentNode -> PendingNode");
-            _explorer.CurrentNode = PendingNode;
-
-            Trace($"SetUpColumns: explorer.CurrentNode -> restore {openingNode}");
-            _explorer.CurrentNode = openingNode;
+            Trace("SetUpColumns: explorer block not resolved (null) — nothing to do");
+            return;
         }
+
+        var node = _explorer.CurrentNode;
+        Trace($"SetUpColumns: active node = {node}");
+
+        switch (node)
+        {
+            case MaterialNode:
+                EnsureNodeColumns(_materialNodeState, "material", () =>
+                {
+                    // Hover drives the material thumbnail, so it needs a dwell long enough not to thrash the
+                    // Label while the pointer crosses the tree, but short enough to feel immediate.
+                    _materialTree?.SetPreSelectionTimeOut(250.0);
+                    InsertColumns(_materialTree,
+                        (MaterialColumn.Name, "Material", 220),
+                        (MaterialColumn.Detail, "Description", 160),
+                        (MaterialColumn.Density, "Density", 90));
+                });
+                break;
+
+            case CurrentAssignmentNode:
+                EnsureNodeColumns(_currentAssignmentNodeState, "currentAssignment", () =>
+                    InsertColumns(_currentAssignmentTree,
+                        (AssignmentColumn.Name, "Material / Body", 220),
+                        (AssignmentColumn.Count, "Bodies / Kind", 110),
+                        (AssignmentColumn.DisplayMaterial, "Display material", 140)));
+                break;
+
+            case PendingNode:
+                EnsureNodeColumns(_pendingNodeState, "pending", () =>
+                    InsertColumns(_pendingAssignmentTree,
+                        (PendingColumn.Name, "Material / Body", 220),
+                        (PendingColumn.Kind, "Kind", 90),
+                        (PendingColumn.Status, "Status", 260)));
+                break;
+
+            default:
+                Trace($"SetUpColumns: unrecognized node {node}, ignoring");
+                break;
+        }
+    }
+
+    /// <summary>Runs <paramref name="setupColumns"/> once for a node's tree, then flushes whatever populate
+    /// call arrived earlier while the node wasn't ready yet.</summary>
+    private void EnsureNodeColumns(NodeState state, string label, Action setupColumns)
+    {
+        if (state.ColumnsReady)
+        {
+            Trace($"SetUpColumns: {label} already set up, skipping");
+            return;
+        }
+
+        Trace($"SetUpColumns: setting up {label}");
+        setupColumns();
+        state.ColumnsReady = true;
+
+        if (state.PendingPopulate is { } populate)
+        {
+            Trace($"SetUpColumns: flushing deferred populate for {label}");
+            state.PendingPopulate = null;
+            populate();
+        }
+    }
+
+    /// <summary>Runs <paramref name="populate"/> now if the node is ready, otherwise remembers it (replacing
+    /// any earlier deferred call) to run the moment the node's columns are set up.</summary>
+    private void RunOrDefer(NodeState state, Action populate)
+    {
+        if (state.ColumnsReady)
+            populate();
         else
-        {
-            Trace("SetUpColumns: explorer block not resolved (null) — page cycling skipped");
-        }
-
-        // Hover drives the material thumbnail, so it needs a dwell long enough not to thrash the Label while
-        // the pointer crosses the tree, but short enough to feel immediate.
-        Trace("SetUpColumns: materialTree.SetPreSelectionTimeOut");
-        _materialTree?.SetPreSelectionTimeOut(250.0);
-
-        Trace("SetUpColumns: InsertColumns materialTree");
-        InsertColumns(_materialTree,
-            (MaterialColumn.Name, "Material", 220),
-            (MaterialColumn.Detail, "Description", 160),
-            (MaterialColumn.Density, "Density", 90));
-
-        Trace("SetUpColumns: InsertColumns currentAssignmentTree");
-        InsertColumns(_currentAssignmentTree,
-            (AssignmentColumn.Name, "Material / Body", 220),
-            (AssignmentColumn.Count, "Bodies / Kind", 110),
-            (AssignmentColumn.DisplayMaterial, "Display material", 140));
-
-        Trace("SetUpColumns: InsertColumns pendingAssignmentTree");
-        InsertColumns(_pendingAssignmentTree,
-            (PendingColumn.Name, "Material / Body", 220),
-            (PendingColumn.Kind, "Kind", 90),
-            (PendingColumn.Status, "Status", 260));
-
-        Trace("SetUpColumns: done");
+            state.PendingPopulate = populate;
     }
 
     private void InsertColumns(Tree? tree, params (int Id, string Title, int Width)[] columns)
@@ -332,11 +377,12 @@ public sealed class BlockAccessor
         if (_materials is null)
             return;
 
-        _materials.Rebuild(() =>
-        {
-            foreach (var root in roots)
-                AddCategory(root, parent: null);
-        });
+        RunOrDefer(_materialNodeState, () =>
+            _materials.Rebuild(() =>
+            {
+                foreach (var root in roots)
+                    AddCategory(root, parent: null);
+            }));
     }
 
     private void AddCategory(MaterialCategoryNode category, Node? parent)
@@ -409,21 +455,22 @@ public sealed class BlockAccessor
         if (_assignments is null)
             return;
 
-        _assignments.Rebuild(() =>
-        {
-            foreach (var group in groups)
+        RunOrDefer(_currentAssignmentNodeState, () =>
+            _assignments.Rebuild(() =>
             {
-                var node = _assignments.Add(group.Row.MaterialLabel, group, parent: null);
-                node.SetColumnDisplayText(AssignmentColumn.Count, group.Row.BodyCount.ToString());
-
-                foreach (var body in group.Bodies)
+                foreach (var group in groups)
                 {
-                    var bodyNode = _assignments.Add(body.Name, AssignmentRowRef.ForBody(group.Row, body), node);
-                    bodyNode.SetColumnDisplayText(AssignmentColumn.Count, body.Kind.ToString());
-                    bodyNode.SetColumnDisplayText(AssignmentColumn.DisplayMaterial, DisplayMaterialText(body));
+                    var node = _assignments.Add(group.Row.MaterialLabel, group, parent: null);
+                    node.SetColumnDisplayText(AssignmentColumn.Count, group.Row.BodyCount.ToString());
+
+                    foreach (var body in group.Bodies)
+                    {
+                        var bodyNode = _assignments.Add(body.Name, AssignmentRowRef.ForBody(group.Row, body), node);
+                        bodyNode.SetColumnDisplayText(AssignmentColumn.Count, body.Kind.ToString());
+                        bodyNode.SetColumnDisplayText(AssignmentColumn.DisplayMaterial, DisplayMaterialText(body));
+                    }
                 }
-            }
-        });
+            }));
     }
 
     /// <summary>Set by the presenter alongside the tree population so the display-material column can be
@@ -443,26 +490,27 @@ public sealed class BlockAccessor
         if (_pending is null)
             return;
 
-        _pending.Rebuild(() =>
-        {
-            foreach (var entry in entries)
+        RunOrDefer(_pendingNodeState, () =>
+            _pending.Rebuild(() =>
             {
-                var node = _pending.Add(entry.Material.Name, new PendingRowRef(entry, null), parent: null);
-                node.SetColumnDisplayText(PendingColumn.Kind, entry.Rows.Count.ToString());
-
-                foreach (var row in entry.Rows)
+                foreach (var entry in entries)
                 {
-                    var bodyNode = _pending.Add(row.Body.Name, new PendingRowRef(entry, row), node);
-                    bodyNode.SetColumnDisplayText(PendingColumn.Kind, row.Body.Kind.ToString());
-                    bodyNode.SetColumnDisplayText(PendingColumn.Status, StatusText(row));
+                    var node = _pending.Add(entry.Material.Name, new PendingRowRef(entry, null), parent: null);
+                    node.SetColumnDisplayText(PendingColumn.Kind, entry.Rows.Count.ToString());
 
-                    if (row.Status == PendingBodyStatus.Blocked)
-                        bodyNode.ForegroundColor = BlockedColor;
-                    else if (row.Status == PendingBodyStatus.NeedsConfirmation)
-                        bodyNode.ForegroundColor = NeedsConfirmationColor;
+                    foreach (var row in entry.Rows)
+                    {
+                        var bodyNode = _pending.Add(row.Body.Name, new PendingRowRef(entry, row), node);
+                        bodyNode.SetColumnDisplayText(PendingColumn.Kind, row.Body.Kind.ToString());
+                        bodyNode.SetColumnDisplayText(PendingColumn.Status, StatusText(row));
+
+                        if (row.Status == PendingBodyStatus.Blocked)
+                            bodyNode.ForegroundColor = BlockedColor;
+                        else if (row.Status == PendingBodyStatus.NeedsConfirmation)
+                            bodyNode.ForegroundColor = NeedsConfirmationColor;
+                    }
                 }
-            }
-        });
+            }));
     }
 
     private static string StatusText(PendingBodyRow row)
