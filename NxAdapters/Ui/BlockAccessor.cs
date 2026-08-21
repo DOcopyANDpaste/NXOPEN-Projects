@@ -302,16 +302,20 @@ public sealed class BlockAccessor
 
     private void EnsureNodeColumns(NodeState state, string label, Action setupColumns)
     {
-        if (state.ColumnsReady)
+        if (!state.ColumnsReady)
         {
-            Trace($"SetUpColumns: {label} already set up, skipping");
-            return;
+            Trace($"SetUpColumns: setting up {label}");
+            setupColumns();
+            state.ColumnsReady = true;
+        }
+        else
+        {
+            Trace($"SetUpColumns: {label} already set up");
         }
 
-        Trace($"SetUpColumns: setting up {label}");
-        setupColumns();
-        state.ColumnsReady = true;
-
+        // The page just became current (this method only runs for _explorer.CurrentNode), so it's now safe
+        // to flush anything queued while the page was off-screen — regardless of whether this is the first
+        // time its columns were set up.
         if (state.PendingPopulate is { } populate)
         {
             Trace($"SetUpColumns: flushing deferred populate for {label}");
@@ -320,9 +324,13 @@ public sealed class BlockAccessor
         }
     }
 
-    private void RunOrDefer(NodeState state, Action populate)
+    // A tree's native controls only exist while its Explorer page is the current one (see the comment at
+    // MaterialNode/CurrentAssignmentNode/PendingNode above); Tree.Redraw on an off-screen page throws
+    // NXException. state.ColumnsReady alone only proves the page was current at some point, not that it
+    // still is, so both conditions are required before populating immediately.
+    private void RunOrDefer(NodeState state, int nodeId, Action populate)
     {
-        if (state.ColumnsReady)
+        if (state.ColumnsReady && _explorer?.CurrentNode == nodeId)
             populate();
         else
             state.PendingPopulate = populate;
@@ -393,7 +401,7 @@ public sealed class BlockAccessor
         if (_materials is null)
             return;
 
-        RunOrDefer(_materialNodeState, () =>
+        RunOrDefer(_materialNodeState, MaterialNode, () =>
             _materials.Rebuild(() =>
             {
                 foreach (var root in roots)
@@ -463,7 +471,7 @@ public sealed class BlockAccessor
         if (_assignments is null)
             return;
 
-        RunOrDefer(_currentAssignmentNodeState, () =>
+        RunOrDefer(_currentAssignmentNodeState, CurrentAssignmentNode, () =>
             _assignments.Rebuild(() =>
             {
                 foreach (var group in groups)
@@ -498,7 +506,7 @@ public sealed class BlockAccessor
         if (_pending is null)
             return;
 
-        RunOrDefer(_pendingNodeState, () =>
+        RunOrDefer(_pendingNodeState, PendingNode, () =>
             _pending.Rebuild(() =>
             {
                 foreach (var entry in entries)
