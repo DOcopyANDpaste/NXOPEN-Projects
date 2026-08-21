@@ -45,16 +45,16 @@ public sealed class BlockAccessor
     internal const string MaterialTreeId = "MaterialTree";
     internal const string CurrentAssignmentTreeId = "CurrentAssignmentTree";
     internal const string PendingAssignmentTreeId = "PendingAssignments";
-    internal const string ExplorerId = "explorer";
+    internal const string TabControlId = "tabControl";
 
-    // Explorer nodes are UGS::UI::Comp::WizardGroup pages, verbatim order from BlockUI.dlx. Each page's
-    // native controls are not constructed until the page becomes current, regardless of the .dlx-level
-    // Expanded="True" flag on every node.
+    // Tab pages are UGS::UI::Comp::WizardGroup pages (same class the dialog's old Explorer container used),
+    // verbatim order from BlockUI.dlx. Each page's native controls are not constructed until the page
+    // becomes current, regardless of the .dlx-level Expanded="True" flag on every node.
     private const int MaterialNode = 0;
     private const int CurrentAssignmentNode = 1;
     private const int PendingNode = 2;
 
-    // One Label/Bitmap per Explorer node. Each one describes the tree it sits under, so all three are
+    // One Label/Bitmap per tab page. Each one describes the tree it sits under, so all three are
     // driven independently rather than all mirroring the material picker.
     internal const string MaterialLabelId = "lbl_MaterialDisplay";
     internal const string AssignmentLabelId = "lbl_MaterialDisplay1";
@@ -97,7 +97,7 @@ public sealed class BlockAccessor
 
     private SelectObject? _selectedBodies;
     private Enumeration? _libraryEnum;
-    private Explorer? _explorer;
+    private TabControl? _tabControl;
     private Tree? _materialTree;
     private Tree? _currentAssignmentTree;
     private Tree? _pendingAssignmentTree;
@@ -109,11 +109,14 @@ public sealed class BlockAccessor
     private TreeBinding<AssignmentRowRef>? _assignments;
     private TreeBinding<PendingRowRef>? _pending;
 
-    /// <summary>Per-Explorer-node construction state. <c>dialogShown_cb</c> fires again every time the user
-    /// switches Explorer node (confirmed empirically — SetUpColumns re-runs on every node change), so column
-    /// setup must be idempotent per node rather than a one-time dialog step. A tree's columns are only ever
-    /// touched once — the first time its node becomes current — and any populate call that arrives before
-    /// that point is remembered and replayed at that moment instead of running immediately.</summary>
+    /// <summary>Per-tab-page construction state. Under the dialog's old Explorer container,
+    /// <c>dialogShown_cb</c> fired again every time the user switched node (confirmed empirically —
+    /// SetUpColumns re-ran on every node change); with TabControl, the presenter's OnUpdate also calls
+    /// <see cref="SetUpColumns"/> on a tab switch as a second trigger, since it's unconfirmed whether tab
+    /// switches still route through dialogShown_cb. Either way, column setup must be idempotent per page
+    /// rather than a one-time dialog step. A tree's columns are only ever touched once — the first time its
+    /// page becomes current — and any populate call that arrives before that point is remembered and
+    /// replayed at that moment instead of running immediately.</summary>
     private sealed class NodeState
     {
         public bool ColumnsReady;
@@ -149,7 +152,7 @@ public sealed class BlockAccessor
 
         _selectedBodies = TryFindBlock<SelectObject>(SelectedBodiesId);
         _libraryEnum = TryFindBlock<Enumeration>(LibraryEnumId);
-        _explorer = TryFindBlock<Explorer>(ExplorerId);
+        _tabControl = TryFindBlock<TabControl>(TabControlId);
         _materialTree = TryFindBlock<Tree>(MaterialTreeId);
         _currentAssignmentTree = TryFindBlock<Tree>(CurrentAssignmentTreeId);
         _pendingAssignmentTree = TryFindBlock<Tree>(PendingAssignmentTreeId);
@@ -157,7 +160,7 @@ public sealed class BlockAccessor
         _assignmentLabel = TryFindBlock<Label>(AssignmentLabelId);
         _pendingLabel = TryFindBlock<Label>(PendingLabelId);
 
-        Trace($"Initialize: resolved explorer={_explorer is not null} materialTree={_materialTree is not null} " +
+        Trace($"Initialize: resolved tabControl={_tabControl is not null} materialTree={_materialTree is not null} " +
               $"currentTree={_currentAssignmentTree is not null} pendingTree={_pendingAssignmentTree is not null}");
 
         if (_materialTree is not null)
@@ -255,13 +258,13 @@ public sealed class BlockAccessor
 
     public void SetUpColumns()
     {
-        if (_explorer is null)
+        if (_tabControl is null)
         {
-            Trace("SetUpColumns: explorer block not resolved (null) — nothing to do");
+            Trace("SetUpColumns: tabControl block not resolved (null) — nothing to do");
             return;
         }
 
-        var node = _explorer.CurrentNode;
+        var node = _tabControl.ActivePage;
         Trace($"SetUpColumns: active node = {node}");
 
         switch (node)
@@ -324,13 +327,13 @@ public sealed class BlockAccessor
         }
     }
 
-    // A tree's native controls only exist while its Explorer page is the current one (see the comment at
+    // A tree's native controls only exist while its tab page is the current one (see the comment at
     // MaterialNode/CurrentAssignmentNode/PendingNode above); Tree.Redraw on an off-screen page throws
     // NXException. state.ColumnsReady alone only proves the page was current at some point, not that it
     // still is, so both conditions are required before populating immediately.
     private void RunOrDefer(NodeState state, int nodeId, Action populate)
     {
-        if (state.ColumnsReady && _explorer?.CurrentNode == nodeId)
+        if (state.ColumnsReady && _tabControl?.ActivePage == nodeId)
             populate();
         else
             state.PendingPopulate = populate;
@@ -440,7 +443,7 @@ public sealed class BlockAccessor
             : $"{density.AsString()} {density.Unit}";
     }
 
-    // ---- Material labels, one per Explorer node ----
+    // ---- Material labels, one per tab page ----
 
     public void SetMaterialLabel(Material? material) => SetLabelText(_materialLabel, material?.Name);
 

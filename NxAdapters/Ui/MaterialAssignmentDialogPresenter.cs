@@ -119,6 +119,13 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             case BlockAccessor.SelectUnassignedButtonId:
                 OnSelectUnassignedSolidsClicked();
                 break;
+            case BlockAccessor.TabControlId:
+                // Belt-and-suspenders alongside OnDialogShown: it's unconfirmed whether switching tabs
+                // still re-fires dialogShown_cb the way Explorer node switches used to, so this covers the
+                // case where NX signals the switch through update_cb instead. SetUpColumns is idempotent
+                // per page, so it's harmless if both paths end up firing.
+                _blocks.SetUpColumns();
+                break;
         }
     }
 
