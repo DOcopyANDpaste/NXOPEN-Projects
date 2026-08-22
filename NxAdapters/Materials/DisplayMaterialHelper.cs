@@ -21,10 +21,10 @@ namespace NxAdapters.Materials;
 /// color read back off a body will not equal the coating RGB written to it.
 ///
 /// No undo-handling here by design: <see cref="PartMaterialService.ApplyPlan"/> calls this from inside
-/// the single UndoScope that already wraps the whole ExecutablePlan. NX's native undo mechanism is
-/// assumed (UNVERIFIED) to capture whatever UF calls happen inside that mark automatically; if
-/// UFSession.Disp material calls don't participate in the standard undo mechanism, a different
-/// mechanism (e.g. explicit UF undo-action registration) would be needed instead.
+/// the per-body UndoScope that already wraps one body's whole assignment. An undo mark is a checkpoint
+/// over the session's entire change stream, not something any individual API opts into — so these raw
+/// UFSession.Disp calls are captured by <c>UndoToMark</c> the same as any managed NXOpen call, with no
+/// separate mechanism needed.
 ///
 /// BodyId -&gt; Body resolution is not done here — this takes an already-resolved Body; that mapping is
 /// <see cref="BodyResolver"/>'s job, driven by <see cref="PartMaterialService"/>.</summary>

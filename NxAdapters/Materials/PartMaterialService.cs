@@ -77,8 +77,6 @@ public sealed class PartMaterialService : IPartMaterialService
 
     public OperationResult ApplyPlan(ExecutablePlan plan)
     {
-        using var undo = new UndoScope(_context.Session, "Apply Material Assignment");
-
         // One apply is one batch: a material the user declines to load is asked about once here, not once
         // per body, but the decline does not carry over into the next apply.
         _physicalMaterials.BeginBatch();
@@ -127,6 +125,11 @@ public sealed class PartMaterialService : IPartMaterialService
 
             anyAttempted = true;
 
+            // One undo mark per body, not per batch: a failure partway through a multi-body Apply should
+            // only roll back the body in progress, not bodies already committed earlier in the same click.
+            using var undo = new UndoScope(
+                _context.Session, $"Apply Material Assignment ({assignment.BodyId})", _context.Log.Error);
+
             try
             {
                 WritePhysicalMaterial(physicalMaterial, body);
@@ -153,12 +156,13 @@ public sealed class PartMaterialService : IPartMaterialService
                     _context.Log.Error($"Side effect '{instruction.InstructionType}' failed for body '{assignment.BodyId}': {result.ErrorCode} {result.Message}");
                 }
             }
+
+            undo.Commit();
         }
 
         if (!anyAttempted && plan.Assignments.Count > 0)
             return OperationResult.Fail("APPLY_ABORTED", "No target bodies in the plan could be resolved.");
 
-        undo.Commit();
         return anyFailed
             ? OperationResult.Fail("PARTIAL_FAILURE", "One or more bodies failed during Apply; see the listing window for details.")
             : OperationResult.Success();
@@ -166,8 +170,6 @@ public sealed class PartMaterialService : IPartMaterialService
 
     public OperationResult ClearMaterial(IReadOnlyList<BodyId> bodyIds)
     {
-        using var undo = new UndoScope(_context.Session, "Clear Material");
-
         try
         {
             _bodyResolver.Refresh();
@@ -192,6 +194,9 @@ public sealed class PartMaterialService : IPartMaterialService
 
             anyAttempted = true;
 
+            // One undo mark per body, not per batch — see ApplyPlan.
+            using var undo = new UndoScope(_context.Session, $"Clear Material ({bodyId})", _context.Log.Error);
+
             try
             {
                 RemovePhysicalMaterial(_context.UFSession, body);
@@ -208,12 +213,13 @@ public sealed class PartMaterialService : IPartMaterialService
                 anyFailed = true;
                 _context.Log.Error($"Failed to remove display material from body '{bodyId}': {displayResult.ErrorCode} {displayResult.Message}");
             }
+
+            undo.Commit();
         }
 
         if (!anyAttempted && bodyIds.Count > 0)
             return OperationResult.Fail("CLEAR_ABORTED", "No target bodies could be resolved.");
 
-        undo.Commit();
         return anyFailed
             ? OperationResult.Fail("PARTIAL_FAILURE", "One or more bodies failed during Clear; see the listing window for details.")
             : OperationResult.Success();
