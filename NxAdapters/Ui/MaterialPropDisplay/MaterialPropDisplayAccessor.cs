@@ -64,6 +64,8 @@ public sealed class MaterialPropDisplayAccessor
 
         _properties.Rebuild(() =>
         {
+            var classNode = _properties.Add(material.Category.DisplayName, value: null, parent: null);
+
             foreach (var property in material.Properties)
             {
                 var values = property.AsArray();
@@ -73,7 +75,7 @@ public sealed class MaterialPropDisplayAccessor
                 // parent row with one child per entry, which is the reason this is a tree and not a table.
                 var isTable = values.Count > 1;
 
-                var node = _properties.Add(NameOf(property), property, parent: null);
+                var node = _properties.Add(NameOf(property), property, parent: classNode);
                 node.SetColumnDisplayText(
                     PropertyColumn.Value,
                     isTable ? $"{values.Count} values" : property.AsString());
