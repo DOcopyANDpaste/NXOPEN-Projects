@@ -7,6 +7,7 @@ using BAMaterial.Ui;
 using BAMaterial.Ui.MaterialPropDisplay;
 using BANxOpen.Foundation.Core.MaterialLibrary;
 using BANxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Materials;
 
 namespace BAMaterial.Ui;
 

@@ -1,9 +1,9 @@
 using BAMaterial.Core.Assignment;
 using BAMaterial.Core.Bodies;
-using BAMaterial.Core.Common;
 using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Core.RuleEngine;
 using static BAMaterial.Core.Tests.Assignment.TestFixtures;
+using BANxOpen.Foundation.Contracts.Bodies;
 
 namespace BAMaterial.Core.Tests.Assignment;
 

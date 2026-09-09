@@ -1,4 +1,5 @@
 using BAMaterial.Core.Bodies;
+using BANxOpen.Foundation.Contracts.Bodies;
 
 namespace BAMaterial.Ui;
 

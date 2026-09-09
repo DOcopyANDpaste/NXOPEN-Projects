@@ -1,5 +1,6 @@
 using BAMaterial.Core.Bodies;
 using BANxOpen.Foundation.Core.RuleEngine;
+using BANxOpen.Foundation.Contracts.Bodies;
 
 namespace BAMaterial.Core.Assignment.Rules;
 

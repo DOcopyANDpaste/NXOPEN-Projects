@@ -1,8 +1,9 @@
 using BAMaterial.Core.Assignment;
 using BAMaterial.Core.Bodies;
-using BAMaterial.Core.Common;
+using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.Core.RuleEngine;
+using BANxOpen.Foundation.Contracts.Bodies;
 
 namespace BAMaterial.Ui;
 

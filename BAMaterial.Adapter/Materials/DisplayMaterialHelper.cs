@@ -4,6 +4,7 @@ using NXOpen;
 using NXOpen.UF;
 using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Materials;
 
 namespace BAMaterial.Adapter.Materials;
 

@@ -1,4 +1,4 @@
-using BAMaterial.Core.Common;
+using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Core.RuleEngine;
 
 namespace BAMaterial.Core.Assignment;

@@ -1,5 +1,5 @@
 using BAMaterial.Core.Bodies;
-using BAMaterial.Core.Common;
+using BANxOpen.Foundation.Contracts.Common;
 using NXOpen;
 using BANxOpen.Foundation.NxAdapters;
 

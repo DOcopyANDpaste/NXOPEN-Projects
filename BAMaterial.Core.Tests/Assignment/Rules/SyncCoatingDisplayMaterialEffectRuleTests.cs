@@ -3,6 +3,7 @@ using BAMaterial.Core.Assignment.Rules;
 using BAMaterial.Core.Bodies;
 using BANxOpen.Foundation.Contracts.Materials;
 using static BAMaterial.Core.Tests.Assignment.TestFixtures;
+using BANxOpen.Foundation.Contracts.Bodies;
 
 namespace BAMaterial.Core.Tests.Assignment.Rules;
 

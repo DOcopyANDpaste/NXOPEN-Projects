@@ -1,3 +1,5 @@
+using BANxOpen.Foundation.Contracts.Materials;
+
 namespace BAMaterial.Core.Assignment.Rules;
 
 /// <summary>Emits an ASSIGN_DISPLAY_MATERIAL instruction carrying the coating's display material name

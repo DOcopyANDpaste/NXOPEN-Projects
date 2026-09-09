@@ -1,10 +1,11 @@
 using BAMaterial.Core.Assignment;
 using BAMaterial.Core.Bodies;
-using BAMaterial.Core.Common;
+using BANxOpen.Foundation.Contracts.Common;
 using BAMaterial.Core.MaterialLibrary;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.Core.MaterialLibrary;
 using BANxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Bodies;
 
 namespace BAMaterial.Ui;
 

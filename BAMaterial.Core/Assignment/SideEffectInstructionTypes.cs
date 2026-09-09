@@ -1,3 +1,5 @@
+using BANxOpen.Foundation.Contracts.Materials;
+
 namespace BAMaterial.Core.Assignment;
 
 /// <summary>Named constants for <see cref="SideEffectInstruction.InstructionType"/> values. The type is

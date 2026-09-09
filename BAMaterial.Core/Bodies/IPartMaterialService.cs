@@ -1,6 +1,6 @@
 using BAMaterial.Core.Assignment;
-using BAMaterial.Core.Common;
 using BANxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.Contracts.Bodies;
 
 namespace BAMaterial.Core.Bodies;
 

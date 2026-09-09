@@ -1,10 +1,9 @@
 using BAMaterial.Core.Bodies;
-using BAMaterial.Core.Common;
+using BANxOpen.Foundation.Contracts.Common;
 using BAMaterial.Core.MaterialLibrary;
 using NXOpen;
 using NXOpen.BlockStyler;
 using BAMaterial.Adapter.Materials;
-using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.NxAdapters;
 
@@ -13,6 +12,7 @@ using BANxOpen.Foundation.NxAdapters;
 // them constantly.
 using Material = BANxOpen.Foundation.Contracts.Materials.Material;
 using SelectObject = NXOpen.BlockStyler.SelectObject;
+using BANxOpen.Foundation.Contracts.Bodies;
 
 namespace BAMaterial.Ui;
 
