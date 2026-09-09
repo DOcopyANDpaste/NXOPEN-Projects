@@ -5,11 +5,10 @@
     <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Core\NxOpen.Foundation.Core.csproj" />
   </ItemGroup>
 
+  <!-- net48 for the in-process NX host, net8.0 so the tests run standalone.
+       ImplicitUsings/Nullable/LangVersion come from the repo-root Directory.Build.props. -->
   <PropertyGroup>
     <TargetFrameworks>net48;net8.0</TargetFrameworks>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <LangVersion>12.0</LangVersion>
   </PropertyGroup>
 
 </Project>

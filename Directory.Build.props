@@ -1,0 +1,21 @@
+<Project>
+
+  <!--
+    Auto-imported by every project under this repo root, and by nothing outside it, so the sibling
+    NxOpen.Foundation repo is unaffected even though projects here reference it.
+
+    Only settings that are genuinely common to all four projects belong here. The NXOpen assembly
+    references and the UGII_BASE_DIR guard deliberately do NOT: they live in build\Nx.References.props,
+    which the two NX projects Import explicitly. Putting the guard here would fire it on
+    BAMaterial.Core and BAMaterial.Core.Tests as well and break `dotnet build` / `dotnet test` on any
+    machine without NX installed, which is the exact thing the solution's ActiveCfg-only arrangement
+    exists to prevent.
+  -->
+
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+  </PropertyGroup>
+
+</Project>
