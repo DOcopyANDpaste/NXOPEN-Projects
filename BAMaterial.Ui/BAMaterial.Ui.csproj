@@ -1,0 +1,87 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Block UI Styler dialog + presenter + the NX entry point. This is the assembly NX loads:
+    BAMaterial.Ui.dll -> BAMaterial.Ui.MaterialAssignmentCommand.Main.
+
+    Everything that knows about BlockStyler or WinForms lives here and nowhere else, so that
+    BAMaterial.Adapter and BAMaterial.Core stay reusable from a batch session or a different front end.
+
+    Like BAMaterial.Adapter: in NxMaterialAssignment.sln for IntelliSense, with NO Build.0 entry in any
+    configuration — it references real NXOpen assemblies that only resolve where NX is installed.
+    Build it explicitly on an NX machine:
+    `dotnet build BAMaterial.Ui\BAMaterial.Ui.csproj`.
+  -->
+
+  <Target Name="RequireUgiiBaseDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="'$(UGII_BASE_DIR)' == ''"
+           Text="UGII_BASE_DIR is not set. This project references the NXOpen managed assemblies and can only be built on a machine with NX installed." />
+  </Target>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BAMaterial.Adapter\BAMaterial.Adapter.csproj" />
+    <!-- Core's planner/finalizer/rules and IMaterialCategoryTreeBuilder are used directly by the
+         presenter and the composition root, so listed even though Adapter brings it transitively. -->
+    <ProjectReference Include="..\BAMaterial.Core\BAMaterial.Core.csproj" />
+    <!-- Contracts: Material, MaterialLibrary, MaterialLibraryReference, MaterialPropertyValue.
+         Core: MaterialLibraryParser, CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository,
+               IMaterialLibraryLoader, RuleEngine.RuleOutcome.
+         NxAdapters: NxSessionContext, NxListingLog. -->
+    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Contracts\NxOpen.Foundation.Contracts.csproj" />
+    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Core\NxOpen.Foundation.Core.csproj" />
+    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.NxAdapters\NxOpen.Foundation.NxAdapters.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>12.0</LangVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <NxManagedDir>$(UGII_BASE_DIR)\NXBIN\managed</NxManagedDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Session, Body, NXException — BlockUI.cs, MaterialAssignmentCommand, MaterialPropertyWindow. -->
+    <Reference Include="NXOpen">
+      <HintPath>$(NxManagedDir)\NXOpen.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!--
+      THE reference this project exists for. NXOpen.BlockStyler (BlockDialog, Tree, Node, TreeListMenu,
+      PropertyList, SelectObject, Label, Enumeration, TabControl, Group, Button) ships in NXOpenUI.dll,
+      NOT NXOpen.dll — confirmed against the NX 2412 install. Also carries NXOpen.UI / NXMessageBox.
+    -->
+    <Reference Include="NXOpenUI">
+      <HintPath>$(NxManagedDir)\NXOpenUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- NXOpen.TaggedObject (BlockStyler.Node's base; keyed on in TreeBinding and read back out of
+         PropertyList.GetTaggedObjectVector in BlockAccessor) lives here, not in NXOpen.dll. -->
+    <Reference Include="NXOpen.Utilities">
+      <HintPath>$(NxManagedDir)\NXOpen.Utilities.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!--
+      Not currently required to compile — no file here mentions UFSession, and no adapter member this
+      project binds has UFSession in its signature. Listed anyway so the first line of UF code written
+      in a dialog callback does not fail as an unexplained CS0012. Zero cost (Private=False).
+    -->
+    <Reference Include="NXOpen.UF">
+      <HintPath>$(NxManagedDir)\NXOpen.UF.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!--
+      Back the WinForms material property popup (MaterialPropDisplay/MaterialPropertyForm.cs and
+      WinFormsMaterialPropertyWindow.cs) — the only two files in the repo that touch either assembly.
+      This is a plain net48 TFM, not a "-windows"-suffixed one, so the SDK's UseWindowsForms property
+      does not apply (that is only for net5.0-windows+). Plain framework References with no HintPath
+      resolve the same way System/System.Core already do.
+    -->
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+</Project>

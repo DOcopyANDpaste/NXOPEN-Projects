@@ -1,11 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
+    Headless NX adapter layer: the only place NXOpen types touch material assignment. No BlockStyler,
+    no WinForms — so a batch/ugbatch caller or a future non-BlockUI front end can reference this
+    without dragging a dialog in. The Block UI Styler dialog lives in BAMaterial.Ui.
+
     In NxMaterialAssignment.sln so it loads in the IDE and gets IntelliSense/analyzer feedback, but with
     no Build.0 entry in any configuration — it references real NXOpen/UFSession assemblies that only
     resolve where NX is installed (UGII_BASE_DIR set), so building it by default would break
     `dotnet build`/`dotnet test` everywhere else. Build it explicitly on an NX machine:
-    `dotnet build NxAdapters\NxAdapters.csproj`.
+    `dotnet build BAMaterial.Adapter\BAMaterial.Adapter.csproj`.
   -->
 
   <Target Name="RequireUgiiBaseDir" BeforeTargets="ResolveAssemblyReferences">
@@ -14,14 +18,14 @@
   </Target>
 
   <ItemGroup>
-    <!-- The dialog's composition root and presenter use Core's planner/finalizer/rules/grouper types,
-         and the shared side-effect Data keys, directly. -->
     <ProjectReference Include="..\BAMaterial.Core\BAMaterial.Core.csproj" />
     <!--
-      Foundation references: Contracts/Core come in transitively via Core.csproj's own references, but
-      are listed explicitly here too since this project uses their types directly (MaterialLibraryParser,
-      CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository, etc.). NxAdapters is the one
-      foundation project that must be referenced directly — it has no other path into this project.
+      Foundation.Contracts is used directly (OperationResult, Material, MaterialLibrary).
+      Foundation.Core arrives transitively via BAMaterial.Core, but stays listed: BAMaterial.Core
+      exposes Foundation.Core.RuleEngine types (RuleOutcome) on its public surface, so relying on the
+      implicit dependency is a CS0012 waiting to happen.
+      Foundation.NxAdapters (NxSessionContext, NxListingLog, NxMessageBoxHelper, UndoScope) has no
+      other path into this project and must be referenced directly.
     -->
     <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Contracts\NxOpen.Foundation.Contracts.csproj" />
     <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Core\NxOpen.Foundation.Core.csproj" />
@@ -38,45 +42,45 @@
   <!--
     Per Skills/common.md non-negotiable #4: no hardcoded install paths, reference via UGII_BASE_DIR.
     Verified against NX 2412: the managed assemblies live in NXBIN\managed (net48), NOT directly under
-    $(UGII_BASE_DIR)\managed as previously assumed. NXBIN\managed_core is the .NET-Core-targeted copy —
-    this project is net48, so it wants the former.
+    $(UGII_BASE_DIR)\managed. NXBIN\managed_core is the .NET-Core-targeted copy — this project is net48.
   -->
   <PropertyGroup>
     <NxManagedDir>$(UGII_BASE_DIR)\NXBIN\managed</NxManagedDir>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Session, Part, Body, PhysicalMaterial. -->
     <Reference Include="NXOpen">
       <HintPath>$(NxManagedDir)\NXOpen.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <!-- UFSession.Disp / .Modl — DisplayMaterialHelper and PartMaterialService. -->
     <Reference Include="NXOpen.UF">
       <HintPath>$(NxManagedDir)\NXOpen.UF.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <!--
-      NXOpen.BlockStyler (Tree, Node, TreeListMenu, BlockDialog, PropertyList, …) ships in NXOpenUI.dll,
-      NOT NXOpen.dll — confirmed against the NX 2412 install. Without this the whole Ui folder fails to
-      compile.
-    -->
-    <Reference Include="NXOpenUI">
-      <HintPath>$(NxManagedDir)\NXOpenUI.dll</HintPath>
-      <Private>False</Private>
-    </Reference>
-    <!-- NXOpen.TaggedObject (which BlockStyler.Node derives from) lives here, not in NXOpen.dll. -->
+    <!-- NXOpen.Tag / NXOpen.TaggedObject live here, not in NXOpen.dll. DisplayMaterialHelper names Tag
+         directly in its private method signatures, and body.Tag is read throughout. -->
     <Reference Include="NXOpen.Utilities">
       <HintPath>$(NxManagedDir)\NXOpen.Utilities.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <!--
-      System.Windows.Forms/System.Drawing back the WinForms material property popup
-      (Ui/MaterialPropDisplay/MaterialPropertyForm.cs, WinFormsMaterialPropertyWindow.cs). This is a plain
-      net48 TFM, not a "-windows"-suffixed one, so the SDK's UseWindowsForms property doesn't apply (that's
-      only for net5.0-windows+ TFMs). Plain framework References with no HintPath resolve the same way
-      System/System.Core already do.
+      NXOpen.UI / NXMessageBox ship here. Not strictly required to COMPILE this project — nothing in
+      Materials/ binds a member whose signature mentions an NXOpenUI type — but kept deliberately:
+      NxPhysicalMaterialSource defaults confirmLoad to NxMessageBoxHelper.Confirm, which really does
+      open an NXMessageBox, and NxSessionContext.Ui is an NXOpen.UI. Costs nothing (Private=False,
+      never copied). Removing it is safe today and would silently start failing with CS0012 the first
+      time anyone touches context.Ui.
+
+      NOTE: System.Windows.Forms and System.Drawing are deliberately NOT referenced here. They belong
+      to the WinForms material property popup, which lives in BAMaterial.Ui. Keeping this project free
+      of them is the point of the split — do not add them back.
     -->
-    <Reference Include="System.Windows.Forms" />
-    <Reference Include="System.Drawing" />
+    <Reference Include="NXOpenUI">
+      <HintPath>$(NxManagedDir)\NXOpenUI.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
   </ItemGroup>
 
 </Project>
