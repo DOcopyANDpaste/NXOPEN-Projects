@@ -5,15 +5,15 @@
     BAMaterial.Ui.dll, entry point BAMaterial.Ui.MaterialAssignmentCommand.Main.
 
     Everything that knows about BlockStyler or WinForms lives here and nowhere else, so that
-    BAMaterial.Adapter and BANxOpen.Foundation.Core.Materials stay reusable from a batch session or a
-    different front end.
+    BANxOpen.Foundation.Core.Materials and BANxOpen.Foundation.NxAdapters stay reusable from a batch
+    session or a different front end.
 
-    Like BAMaterial.Adapter: in NxMaterialAssignment.sln for IntelliSense, with NO Build.0 entry in any
-    configuration. Build it explicitly on an NX machine:
+    In NxMaterialAssignment.sln for IntelliSense, with NO Build.0 entry in any configuration.
+    Build it explicitly on an NX machine:
     `dotnet build BAMaterial.Ui\BAMaterial.Ui.csproj`.
   -->
 
-  <!-- NXOpen references + the UGII_BASE_DIR guard, shared with BAMaterial.Adapter. NXOpenUI, which
+  <!-- NXOpen references + the UGII_BASE_DIR guard. NXOpenUI, which
        carries NXOpen.BlockStyler, is the reference this project exists for. -->
   <Import Project="..\build\Nx.References.props" />
 
@@ -22,14 +22,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BAMaterial.Adapter\BAMaterial.Adapter.csproj" />
     <!-- Contracts: Material, MaterialLibrary, MaterialLibraryReference, MaterialPropertyValue, BodyId.
          Core: RuleEngine.RuleOutcome.
          Core.Materials: the planner/finalizer/rules, IMaterialCategoryTreeBuilder, MaterialLibraryParser,
                CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository, IMaterialLibraryLoader.
-               Used directly by the presenter and the composition root, so listed even though Adapter
-               brings it transitively.
-         NxAdapters: NxSessionContext, NxListingLog. -->
+         NxAdapters: NxSessionContext, NxListingLog, and Materials\ (PartMaterialService, BodyResolver,
+               DisplayMaterialHelper, NxPhysicalMaterialSource), formerly the BAMaterial.Adapter project. -->
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Contracts\BANxOpen.Foundation.Contracts.csproj" />
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core\BANxOpen.Foundation.Core.csproj" />
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core.Materials\BANxOpen.Foundation.Core.Materials.csproj" />
@@ -40,7 +38,7 @@
     <!--
       Back the WinForms material property popup (MaterialPropDisplay/MaterialPropertyForm.cs and
       WinFormsMaterialPropertyWindow.cs), the only two files in the repo that touch either assembly.
-      Deliberately declared here rather than in build\Nx.References.props so BAMaterial.Adapter cannot
+      Deliberately declared here rather than in build\Nx.References.props so no headless project can
       pick them up. This is a plain net48 TFM, not a "-windows"-suffixed one, so the SDK's
       UseWindowsForms property does not apply (that is only for net5.0-windows+). Plain framework
       References with no HintPath resolve the same way System/System.Core already do.

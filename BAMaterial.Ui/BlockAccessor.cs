@@ -3,7 +3,7 @@ using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Core.Materials.Library;
 using NXOpen;
 using NXOpen.BlockStyler;
-using BAMaterial.Adapter.Materials;
+using BANxOpen.Foundation.NxAdapters.Materials;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.NxAdapters;
 

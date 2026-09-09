@@ -2,7 +2,7 @@ using BANxOpen.Foundation.Core.Materials;
 using BANxOpen.Foundation.Core.Materials.Assignment;
 using BANxOpen.Foundation.Core.Materials.Library;
 using NXOpen;
-using BAMaterial.Adapter.Materials;
+using BANxOpen.Foundation.NxAdapters.Materials;
 using BAMaterial.Ui;
 using BAMaterial.Ui.MaterialPropDisplay;
 using BANxOpen.Foundation.NxAdapters;
