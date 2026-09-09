@@ -5,7 +5,7 @@ using NXOpen.UF;
 using NxOpen.Foundation.Contracts.Common;
 using NxOpen.Foundation.NxAdapters;
 
-namespace NxAdapters.Materials;
+namespace BAMaterial.Adapter.Materials;
 
 /// <summary>Reads and writes a body's display/coating material via UFSession.Disp. Executes
 /// ASSIGN_DISPLAY_MATERIAL side-effect instructions (emitted by

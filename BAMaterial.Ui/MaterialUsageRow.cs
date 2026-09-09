@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Contracts.Common;
 
-namespace NxAdapters.Ui;
+namespace BAMaterial.Ui;
 
 /// <summary>One row of the material-usage table: a distinct physical material name currently in use in
 /// the part (or the synthetic <see cref="UnassignedLabel"/> row for bodies with no physical material),

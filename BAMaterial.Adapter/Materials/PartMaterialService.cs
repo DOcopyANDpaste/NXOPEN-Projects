@@ -8,7 +8,7 @@ using NxOpen.Foundation.Contracts.Common;
 using NxOpen.Foundation.Contracts.Materials;
 using NxOpen.Foundation.NxAdapters;
 
-namespace NxAdapters.Materials;
+namespace BAMaterial.Adapter.Materials;
 
 /// <summary>Implements <see cref="IPartMaterialService"/> — the seam to the live NX work part.
 /// GetBodies/GetCurrentAssignments always rescan (<see cref="BodyResolver.Refresh"/>) rather than

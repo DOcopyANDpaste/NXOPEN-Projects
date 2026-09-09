@@ -3,7 +3,7 @@ using BAMaterial.Core.Common;
 using NXOpen;
 using NxOpen.Foundation.NxAdapters;
 
-namespace NxAdapters.Materials;
+namespace BAMaterial.Adapter.Materials;
 
 /// <summary>Maps between the plain-string <see cref="BodyId"/> used across Core and live NXOpen
 /// <see cref="Body"/> objects in the work part. Every <see cref="IPartMaterialService"/>

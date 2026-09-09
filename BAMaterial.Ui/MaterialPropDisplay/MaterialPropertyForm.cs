@@ -3,7 +3,7 @@ using System.IO;
 using System.Windows.Forms;
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace NxAdapters.Ui.MaterialPropDisplay;
+namespace BAMaterial.Ui.MaterialPropDisplay;
 
 /// <summary>Read-only material-property popup, WinForms replacement for the Block UI Styler tree
 /// (<see cref="MaterialDisplay_UIBlock"/>/<see cref="MaterialPropDisplayAccessor"/>, kept for rollback).

@@ -3,7 +3,7 @@ using BAMaterial.Core.Common;
 using BAMaterial.Core.MaterialLibrary;
 using NXOpen;
 using NXOpen.BlockStyler;
-using NxAdapters.Materials;
+using BAMaterial.Adapter.Materials;
 using NxOpen.Foundation.Contracts.Common;
 using NxOpen.Foundation.Contracts.Materials;
 using NxOpen.Foundation.NxAdapters;
@@ -14,7 +14,7 @@ using NxOpen.Foundation.NxAdapters;
 using Material = NxOpen.Foundation.Contracts.Materials.Material;
 using SelectObject = NXOpen.BlockStyler.SelectObject;
 
-namespace NxAdapters.Ui;
+namespace BAMaterial.Ui;
 
 /// <summary>All <c>TopBlock.FindBlock("stringId")</c> lookups and typed block reads/writes live here, per
 /// Skills/with-block-ui.md §3 — when the Styler regenerates and renames/reorders blocks, only this file

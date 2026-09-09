@@ -1,7 +1,7 @@
 using NXOpen;
 using NxOpen.Foundation.NxAdapters;
 
-namespace NxAdapters.Materials;
+namespace BAMaterial.Adapter.Materials;
 
 /// <summary>Turns a (library name, material name) pair into a <see cref="PhysicalMaterial"/> that exists in
 /// the work part, so it can be assigned to a body. The single place that pays the cost of NX's material

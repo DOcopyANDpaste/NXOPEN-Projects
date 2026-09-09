@@ -4,7 +4,7 @@ using NxOpen.Foundation.Contracts.Common;
 
 namespace BAMaterial.Core.Bodies;
 
-/// <summary>Seam to the NX work part. Implemented by NxAdapters; Core never touches NXOpen types.
+/// <summary>Seam to the NX work part. Implemented by BAMaterial.Adapter; Core never touches NXOpen types.
 /// <see cref="GetBodies"/> and <see cref="GetCurrentAssignments"/> are always a fresh rescan of the
 /// part — the assigned-materials table must reflect live state, never session-cached state.</summary>
 public interface IPartMaterialService

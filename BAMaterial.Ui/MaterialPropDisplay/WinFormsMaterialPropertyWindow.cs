@@ -3,7 +3,7 @@ using System.Windows.Forms;
 using NxOpen.Foundation.Contracts.Materials;
 using NxOpen.Foundation.NxAdapters;
 
-namespace NxAdapters.Ui.MaterialPropDisplay;
+namespace BAMaterial.Ui.MaterialPropDisplay;
 
 /// <summary>WinForms replacement for <see cref="MaterialPropertyWindow"/> (kept, unused, for rollback).
 ///

@@ -2,13 +2,13 @@ using BAMaterial.Core.Assignment;
 using BAMaterial.Core.Assignment.Rules;
 using BAMaterial.Core.MaterialLibrary;
 using NXOpen;
-using NxAdapters.Materials;
-using NxAdapters.Ui;
-using NxAdapters.Ui.MaterialPropDisplay;
+using BAMaterial.Adapter.Materials;
+using BAMaterial.Ui;
+using BAMaterial.Ui.MaterialPropDisplay;
 using NxOpen.Foundation.Core.MaterialLibrary;
 using NxOpen.Foundation.NxAdapters;
 
-namespace NxAdapters;
+namespace BAMaterial.Ui;
 
 /// <summary>Entry point NX invokes from a MenuScript/ribbon action, per Skills/without-block-ui.md §1.
 /// The only class that knows every layer — composes the whole dependency graph once per launch and shows

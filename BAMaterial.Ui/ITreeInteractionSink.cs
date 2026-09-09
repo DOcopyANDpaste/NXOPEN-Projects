@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace NxAdapters.Ui;
+namespace BAMaterial.Ui;
 
 /// <summary>What <see cref="BlockAccessor"/> calls back into when the user touches a tree. Implemented by
 /// <see cref="MaterialAssignmentDialogPresenter"/>.

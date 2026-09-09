@@ -4,7 +4,7 @@ using BAMaterial.Core.Common;
 using NxOpen.Foundation.Contracts.Materials;
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace NxAdapters.Ui;
+namespace BAMaterial.Ui;
 
 /// <summary>What the planner decided about one body in a staged assignment, flattened to the single value
 /// the Status column shows.</summary>

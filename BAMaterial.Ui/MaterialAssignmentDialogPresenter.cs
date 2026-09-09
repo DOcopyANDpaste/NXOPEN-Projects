@@ -6,7 +6,7 @@ using NxOpen.Foundation.Contracts.Materials;
 using NxOpen.Foundation.Core.MaterialLibrary;
 using NxOpen.Foundation.NxAdapters;
 
-namespace NxAdapters.Ui;
+namespace BAMaterial.Ui;
 
 /// <summary>All dialog logic — the generated <c>BlockUI.cs</c> stays a thin set of delegations to this
 /// class, per Skills/with-block-ui.md §1.

@@ -34,7 +34,7 @@ using NXOpen.BlockStyler;
 // Same reason as BlockUI.cs: generated code is nullable-oblivious and would otherwise emit CS86xx warnings.
 #nullable disable
 
-namespace NxAdapters.Ui.MaterialPropDisplay;
+namespace BAMaterial.Ui.MaterialPropDisplay;
 
 //------------------------------------------------------------------------------
 //Represents Block Styler application class
