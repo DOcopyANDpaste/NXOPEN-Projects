@@ -84,4 +84,29 @@
     <Reference Include="System.Drawing" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      Block UI Styler layout files. Not compiled and not embedded. A glob rather than a file list
+      because the Styler adds new .dlx files as the dialog grows.
+
+      IMPORTANT: copying these to bin\ does NOT by itself make NX find them. Both dialogs load their
+      layout by bare filename (BlockUI.cs "theDlxFileName = BlockUI.dlx", and likewise in
+      MaterialDisplay_UIBlock.cs), and NX resolves that against its own "application" search path
+      (%UGII_USER_DIR%\application, the application folders of any directory listed in the file at
+      %UGII_CUSTOM_DIRECTORY_FILE%, then the shipped location), NOT against the assembly's directory.
+      These items exist so the files are visible in Solution Explorer and so deploying is a copy of one
+      output folder rather than a hand-assembled file list. They must still land somewhere NX searches.
+
+      The .udx is only needed by the Styler at authoring time (it registers MaterialDisplay_UIBlock in
+      the User Defined UI Block palette); it is not required for the compiled dialog to run, but is
+      shipped anyway so a second developer can reopen the dialog in the Styler.
+
+      The Link metadata flattens them into the root of the output folder. Without it,
+      MaterialPropDisplay\MaterialDisplay_UIBlock.dlx would be copied to a matching subfolder, where a
+      bare-filename lookup would never find it.
+    -->
+    <None Include="**\*.dlx" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+    <None Include="**\*.udx" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>
