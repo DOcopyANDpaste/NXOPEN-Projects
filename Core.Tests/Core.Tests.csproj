@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Core\Core.csproj" />
+    <ProjectReference Include="..\BAMaterial.Core\BAMaterial.Core.csproj" />
   </ItemGroup>
 
 </Project>

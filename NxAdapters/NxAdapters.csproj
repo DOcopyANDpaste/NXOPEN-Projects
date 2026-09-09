@@ -16,7 +16,7 @@
   <ItemGroup>
     <!-- The dialog's composition root and presenter use Core's planner/finalizer/rules/grouper types,
          and the shared side-effect Data keys, directly. -->
-    <ProjectReference Include="..\Core\Core.csproj" />
+    <ProjectReference Include="..\BAMaterial.Core\BAMaterial.Core.csproj" />
     <!--
       Foundation references: Contracts/Core come in transitively via Core.csproj's own references, but
       are listed explicitly here too since this project uses their types directly (MaterialLibraryParser,

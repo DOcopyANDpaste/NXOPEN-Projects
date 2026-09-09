@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Core", "Core\Core.csproj", "{0A50DE20-2548-4308-A5E3-9C2DD3E245A7}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BAMaterial.Core", "BAMaterial.Core\BAMaterial.Core.csproj", "{0A50DE20-2548-4308-A5E3-9C2DD3E245A7}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Core.Tests", "Core.Tests\Core.Tests.csproj", "{479DDB0C-5E01-4D35-B23D-A2801927B2FC}"
 EndProject
