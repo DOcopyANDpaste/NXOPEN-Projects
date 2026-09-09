@@ -7,7 +7,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BAMaterial.Core", "BAMateri
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BAMaterial.Core.Tests", "BAMaterial.Core.Tests\BAMaterial.Core.Tests.csproj", "{479DDB0C-5E01-4D35-B23D-A2801927B2FC}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NxAdapters", "NxAdapters\NxAdapters.csproj", "{C3F1A7E2-8B40-4A16-9D5C-6E2B0A9F4D31}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BAMaterial.Adapter", "BAMaterial.Adapter\BAMaterial.Adapter.csproj", "{C3F1A7E2-8B40-4A16-9D5C-6E2B0A9F4D31}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
