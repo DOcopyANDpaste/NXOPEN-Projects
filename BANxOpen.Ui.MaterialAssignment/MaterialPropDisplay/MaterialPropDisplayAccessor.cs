@@ -1,7 +1,7 @@
 using NXOpen.BlockStyler;
 using BANxOpen.Foundation.Contracts.Materials;
 
-namespace BAMaterial.Ui.MaterialPropDisplay;
+namespace BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 
 /// <summary>Typed access to the two blocks inside <c>MaterialDisplay_UIBlock.dlx</c> — the same role
 /// <see cref="BlockAccessor"/> plays for the main dialog, kept separate because this is a different block set
@@ -43,7 +43,7 @@ public sealed class MaterialPropDisplayAccessor
     /// against being called twice: the main dialog's <see cref="BlockAccessor"/> needed the same guard because
     /// <c>dialogShown_cb</c> is confirmed, empirically, to fire more than once per dialog — inserting a
     /// duplicate column id throws.</summary>
-    /// <remarks>See the <c>NodeState</c>/<c>EnsureNodeColumns</c> guard in <c>BAMaterial.Ui.BlockAccessor</c>
+    /// <remarks>See the <c>NodeState</c>/<c>EnsureNodeColumns</c> guard in <c>BANxOpen.Ui.MaterialAssignment.BlockAccessor</c>
     /// for the main dialog's equivalent.</remarks>
     public void SetUpColumns()
     {

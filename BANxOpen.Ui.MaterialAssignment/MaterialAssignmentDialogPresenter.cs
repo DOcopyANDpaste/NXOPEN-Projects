@@ -6,7 +6,7 @@ using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Bodies;
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>All dialog logic — the generated <c>BlockUI.cs</c> stays a thin set of delegations to this
 /// class, per Skills/with-block-ui.md §1.

@@ -1,6 +1,6 @@
 using BANxOpen.Foundation.Contracts.Materials;
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>What <see cref="BlockAccessor"/> calls back into when the user touches a tree. Implemented by
 /// <see cref="MaterialAssignmentDialogPresenter"/>.

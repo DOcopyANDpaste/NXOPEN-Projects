@@ -1,6 +1,6 @@
 using BANxOpen.Foundation.Contracts.Materials;
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>The full material-property popup, opened from the material tree. An interface rather than a
 /// direct dependency so the presenter's logic does not drag in a second BlockDialog — and so the popup can

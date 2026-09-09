@@ -3,7 +3,7 @@ using System.Windows.Forms;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.NxAdapters;
 
-namespace BAMaterial.Ui.MaterialPropDisplay;
+namespace BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 
 /// <summary>WinForms replacement for <see cref="MaterialPropertyWindow"/> (kept, unused, for rollback).
 ///

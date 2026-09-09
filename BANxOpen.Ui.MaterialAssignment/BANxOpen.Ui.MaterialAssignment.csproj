@@ -2,7 +2,7 @@
 
   <!--
     Block UI Styler dialog + presenter + the NX entry point. This is the assembly NX loads:
-    BAMaterial.Ui.dll, entry point BAMaterial.Ui.MaterialAssignmentCommand.Main.
+    BANxOpen.Ui.MaterialAssignment.dll, entry point BANxOpen.Ui.MaterialAssignment.MaterialAssignmentCommand.Main.
 
     Everything that knows about BlockStyler or WinForms lives here and nowhere else, so that
     BANxOpen.Foundation.Core.Materials and BANxOpen.Foundation.NxAdapters stay reusable from a batch
@@ -10,7 +10,7 @@
 
     In NxMaterialAssignment.sln for IntelliSense, with NO Build.0 entry in any configuration.
     Build it explicitly on an NX machine:
-    `dotnet build BAMaterial.Ui\BAMaterial.Ui.csproj`.
+    `dotnet build BANxOpen.Ui.MaterialAssignment\BANxOpen.Ui.MaterialAssignment.csproj`.
   -->
 
   <!-- NXOpen references + the UGII_BASE_DIR guard. NXOpenUI, which

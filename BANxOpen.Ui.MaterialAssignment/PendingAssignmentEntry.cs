@@ -5,7 +5,7 @@ using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.Core.RuleEngine;
 using BANxOpen.Foundation.Contracts.Bodies;
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>What the planner decided about one body in a staged assignment, flattened to the single value
 /// the Status column shows.</summary>

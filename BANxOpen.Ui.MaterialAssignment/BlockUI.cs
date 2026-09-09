@@ -55,7 +55,7 @@ using NXOpen.BlockStyler;
 // generated file keeps the build output meaningful instead of drowning real warnings.
 #nullable disable
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 //------------------------------------------------------------------------------
 //Represents Block Styler application class

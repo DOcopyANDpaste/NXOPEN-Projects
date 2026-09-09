@@ -1,7 +1,7 @@
 using NXOpen;
 using NXOpen.BlockStyler;
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>Owns one Tree block's contents and the mapping from its rows back to the domain objects they
 /// were rendered from. Every tree in this dialog goes through one of these, so the rebuild idiom and the

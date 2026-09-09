@@ -3,7 +3,7 @@ using System.IO;
 using System.Windows.Forms;
 using BANxOpen.Foundation.Contracts.Materials;
 
-namespace BAMaterial.Ui.MaterialPropDisplay;
+namespace BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 
 /// <summary>Read-only material-property popup, WinForms replacement for the Block UI Styler tree
 /// (<see cref="MaterialDisplay_UIBlock"/>/<see cref="MaterialPropDisplayAccessor"/>, kept for rollback).

@@ -1,7 +1,7 @@
 using BANxOpen.Foundation.Core.Materials.Bodies;
 using BANxOpen.Foundation.Contracts.Bodies;
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>What one row of <c>CurrentAssignmentTree</c> stands for. A root row names a material in use and
 /// carries <see cref="Body"/> null; a child row names one body under it. Uniform so a context-menu command

@@ -3,12 +3,12 @@ using BANxOpen.Foundation.Core.Materials.Assignment;
 using BANxOpen.Foundation.Core.Materials.Library;
 using NXOpen;
 using BANxOpen.Foundation.NxAdapters.Materials;
-using BAMaterial.Ui;
-using BAMaterial.Ui.MaterialPropDisplay;
+using BANxOpen.Ui.MaterialAssignment;
+using BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Materials;
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>Entry point NX invokes from a MenuScript/ribbon action, per Skills/without-block-ui.md §1.
 /// The only class that knows every layer — composes the whole dependency graph once per launch and shows

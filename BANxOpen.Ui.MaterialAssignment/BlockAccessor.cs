@@ -14,7 +14,7 @@ using Material = BANxOpen.Foundation.Contracts.Materials.Material;
 using SelectObject = NXOpen.BlockStyler.SelectObject;
 using BANxOpen.Foundation.Contracts.Bodies;
 
-namespace BAMaterial.Ui;
+namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>All <c>TopBlock.FindBlock("stringId")</c> lookups and typed block reads/writes live here, per
 /// Skills/with-block-ui.md §3 — when the Styler regenerates and renames/reorders blocks, only this file

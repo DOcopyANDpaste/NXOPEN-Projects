@@ -5,7 +5,7 @@ using BANxOpen.Foundation.NxAdapters;
 // Disambiguated from NXOpen.Material, which `using NXOpen` above also brings into scope.
 using Material = BANxOpen.Foundation.Contracts.Materials.Material;
 
-namespace BAMaterial.Ui.MaterialPropDisplay;
+namespace BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 
 /// <summary>The full material-property popup, opened from the material tree (double-click, or right-click →
 /// Properties).
