@@ -1,5 +1,5 @@
-using BAMaterial.Core.Assignment;
-using BAMaterial.Core.Bodies;
+using BANxOpen.Foundation.Core.Materials.Assignment;
+using BANxOpen.Foundation.Core.Materials.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.Core.RuleEngine;

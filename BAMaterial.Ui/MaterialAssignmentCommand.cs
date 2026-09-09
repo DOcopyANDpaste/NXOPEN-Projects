@@ -1,11 +1,10 @@
-using BAMaterial.Core.Assignment;
-using BAMaterial.Core.Assignment.Rules;
-using BAMaterial.Core.MaterialLibrary;
+using BANxOpen.Foundation.Core.Materials;
+using BANxOpen.Foundation.Core.Materials.Assignment;
+using BANxOpen.Foundation.Core.Materials.Library;
 using NXOpen;
 using BAMaterial.Adapter.Materials;
 using BAMaterial.Ui;
 using BAMaterial.Ui.MaterialPropDisplay;
-using BANxOpen.Foundation.Core.MaterialLibrary;
 using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Materials;
 
@@ -37,21 +36,11 @@ public static class MaterialAssignmentCommand
         var libraryLoader = new CachingMaterialLibraryLoader(libraryRepository, libraryParser);
         var categoryTreeBuilder = new MaterialCategoryTreeBuilder();
 
-        var planner = new MaterialAssignmentPlanner(new IMaterialAssignmentRule[]
-        {
-            new BlockRestrictedBodyTypeRule(),
-            new RequireConfirmationOnReassignmentRule(),
-            new ValidateCoatingDisplayMaterialRule(),
-        });
-
-        // SyncPhysicalPropertiesEffectRule is intentionally NOT registered: nothing executes
-        // SYNC_PHYSICAL_PROPERTY instructions, so wiring it would only generate work ApplyPlan discards.
-        // The rule and its tests are kept — add it back here alongside a matching executor in
-        // PartMaterialService when physical property sync is wanted.
-        var finalizer = new AssignmentPlanFinalizer(new IPostAssignmentEffectRule[]
-        {
-            new SyncCoatingDisplayMaterialEffectRule(),
-        });
+        // The shared baseline, so this dialog and any feature tool that assigns material enforce exactly
+        // the same rules. See StandardMaterialRules for what is in each set and why
+        // SyncPhysicalPropertiesEffectRule is deliberately left out.
+        var planner = new MaterialAssignmentPlanner(StandardMaterialRules.Gates());
+        var finalizer = new AssignmentPlanFinalizer(StandardMaterialRules.Effects());
 
         // The Styler-generated dialog. Constructing it creates the BlockDialog from BlockUI.dlx, so the
         // accessor can be handed it straight away — it resolves its blocks later, from initialize_cb.

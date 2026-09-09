@@ -5,7 +5,8 @@
     BAMaterial.Ui.dll, entry point BAMaterial.Ui.MaterialAssignmentCommand.Main.
 
     Everything that knows about BlockStyler or WinForms lives here and nowhere else, so that
-    BAMaterial.Adapter and BAMaterial.Core stay reusable from a batch session or a different front end.
+    BAMaterial.Adapter and BANxOpen.Foundation.Core.Materials stay reusable from a batch session or a
+    different front end.
 
     Like BAMaterial.Adapter: in NxMaterialAssignment.sln for IntelliSense, with NO Build.0 entry in any
     configuration. Build it explicitly on an NX machine:
@@ -22,15 +23,16 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BAMaterial.Adapter\BAMaterial.Adapter.csproj" />
-    <!-- Core's planner/finalizer/rules and IMaterialCategoryTreeBuilder are used directly by the
-         presenter and the composition root, so listed even though Adapter brings it transitively. -->
-    <ProjectReference Include="..\BAMaterial.Core\BAMaterial.Core.csproj" />
-    <!-- Contracts: Material, MaterialLibrary, MaterialLibraryReference, MaterialPropertyValue.
-         Core: MaterialLibraryParser, CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository,
-               IMaterialLibraryLoader, RuleEngine.RuleOutcome.
+    <!-- Contracts: Material, MaterialLibrary, MaterialLibraryReference, MaterialPropertyValue, BodyId.
+         Core: RuleEngine.RuleOutcome.
+         Core.Materials: the planner/finalizer/rules, IMaterialCategoryTreeBuilder, MaterialLibraryParser,
+               CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository, IMaterialLibraryLoader.
+               Used directly by the presenter and the composition root, so listed even though Adapter
+               brings it transitively.
          NxAdapters: NxSessionContext, NxListingLog. -->
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Contracts\BANxOpen.Foundation.Contracts.csproj" />
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core\BANxOpen.Foundation.Core.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core.Materials\BANxOpen.Foundation.Core.Materials.csproj" />
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.NxAdapters\BANxOpen.Foundation.NxAdapters.csproj" />
   </ItemGroup>
 

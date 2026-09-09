@@ -1,9 +1,8 @@
-using BAMaterial.Core.Assignment;
-using BAMaterial.Core.Bodies;
+using BANxOpen.Foundation.Core.Materials.Assignment;
+using BANxOpen.Foundation.Core.Materials.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
-using BAMaterial.Core.MaterialLibrary;
+using BANxOpen.Foundation.Core.Materials.Library;
 using BANxOpen.Foundation.Contracts.Materials;
-using BANxOpen.Foundation.Core.MaterialLibrary;
 using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Bodies;
 

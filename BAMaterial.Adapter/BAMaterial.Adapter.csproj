@@ -12,8 +12,8 @@
     `dotnet build BAMaterial.Adapter\BAMaterial.Adapter.csproj`.
   -->
 
-  <!-- NXOpen references + the UGII_BASE_DIR guard. Explicit Import, not Directory.Build.props: the
-       guard must not fire on BAMaterial.Core or BAMaterial.Core.Tests. -->
+  <!-- NXOpen references + the UGII_BASE_DIR guard. Explicit Import, not Directory.Build.props, so the
+       guard cannot fire on a project that must build without NX installed. -->
   <Import Project="..\build\Nx.References.props" />
 
   <PropertyGroup>
@@ -21,17 +21,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\BAMaterial.Core\BAMaterial.Core.csproj" />
     <!--
-      Foundation.Contracts is used directly (OperationResult, Material, MaterialLibrary).
-      Foundation.Core arrives transitively via BAMaterial.Core, but stays listed: BAMaterial.Core
-      exposes Foundation.Core.RuleEngine types (RuleOutcome) on its public surface, so relying on the
-      implicit dependency is a CS0012 waiting to happen.
+      Foundation.Contracts is used directly (OperationResult, Material, MaterialLibrary, BodyId).
+      Foundation.Core arrives transitively via Core.Materials, but stays listed: Core.Materials exposes
+      Foundation.Core.RuleEngine types (RuleOutcome) on its public surface, so relying on the implicit
+      dependency is a CS0012 waiting to happen.
+      Foundation.Core.Materials carries the assignment engine this project implements IPartMaterialService
+      for; it replaces the former BAMaterial.Core.
       Foundation.NxAdapters (NxSessionContext, NxListingLog, NxMessageBoxHelper, UndoScope) has no
       other path into this project and must be referenced directly.
     -->
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Contracts\BANxOpen.Foundation.Contracts.csproj" />
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core\BANxOpen.Foundation.Core.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core.Materials\BANxOpen.Foundation.Core.Materials.csproj" />
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.NxAdapters\BANxOpen.Foundation.NxAdapters.csproj" />
   </ItemGroup>
 

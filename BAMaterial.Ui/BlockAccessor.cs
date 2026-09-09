@@ -1,6 +1,6 @@
-using BAMaterial.Core.Bodies;
+using BANxOpen.Foundation.Core.Materials.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
-using BAMaterial.Core.MaterialLibrary;
+using BANxOpen.Foundation.Core.Materials.Library;
 using NXOpen;
 using NXOpen.BlockStyler;
 using BAMaterial.Adapter.Materials;
