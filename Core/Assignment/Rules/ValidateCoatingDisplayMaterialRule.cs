@@ -10,9 +10,9 @@ namespace Core.Assignment.Rules;
 /// conflict with the body's current display material → Allow.</item>
 /// <item>Name present, color missing or malformed → Block (bad library data; not something the end user
 /// can fix, so the message directs them to the material library administrator).</item>
-/// <item>Name missing, regardless of color → Warn (non-blocking; the display material simply won't be
-/// synced for this assignment). This applies even when neither property is present at all — deliberately
-/// not special-cased, per direct confirmation with the user.</item>
+/// <item>Name missing, regardless of color → Warn (non-blocking; the effect rule falls back to the shared
+/// default display material for this assignment instead of the library's own coating data). This applies
+/// even when neither property is present at all — deliberately not special-cased.</item>
 /// <item>Body already has a material assigned but no display material currently associated with it →
 /// Allow (this is the expected first-sync case, not a problem to flag; the sync effect rule will apply
 /// the display material automatically). A reason code and message are still attached for reference/
@@ -39,7 +39,7 @@ public sealed class ValidateCoatingDisplayMaterialRule : IMaterialAssignmentRule
                 RuleId,
                 RuleDecision.Warn,
                 "COATING_NAME_MISSING",
-                $"Material '{material.Name}' has no {CoatingPropertyReader.MaterialNamePropertyName} defined — its display material will not be synced.");
+                $"Material '{material.Name}' has no {CoatingPropertyReader.MaterialNamePropertyName} defined — a default display material will be applied instead.");
         }
 
         if (!CoatingPropertyReader.TryGetRgb(material, out var r, out var g, out var b))

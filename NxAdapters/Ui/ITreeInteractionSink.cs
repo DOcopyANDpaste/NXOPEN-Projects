@@ -29,6 +29,10 @@ public interface ITreeInteractionSink
     void OnMaterialMenuCommand(int menuItemId, IReadOnlyList<Material> targets);
 
     void OnAssignmentSelected(AssignmentRowRef? row);
+
+    /// <summary>Double-click on a current-assignment row (material or body).</summary>
+    void OnAssignmentDefaultAction(AssignmentRowRef row);
+
     IReadOnlyList<TreeMenuItem> BuildAssignmentMenu(AssignmentRowRef? clicked);
     void OnAssignmentMenuCommand(int menuItemId, IReadOnlyList<AssignmentRowRef> targets);
 

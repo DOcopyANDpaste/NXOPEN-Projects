@@ -68,6 +68,15 @@
       <HintPath>$(NxManagedDir)\NXOpen.Utilities.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <!--
+      System.Windows.Forms/System.Drawing back the WinForms material property popup
+      (Ui/MaterialPropDisplay/MaterialPropertyForm.cs, WinFormsMaterialPropertyWindow.cs). This is a plain
+      net48 TFM, not a "-windows"-suffixed one, so the SDK's UseWindowsForms property doesn't apply (that's
+      only for net5.0-windows+ TFMs). Plain framework References with no HintPath resolve the same way
+      System/System.Core already do.
+    -->
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
   </ItemGroup>
 
 </Project>

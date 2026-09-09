@@ -63,6 +63,9 @@ public sealed class DisplayMaterialHelper
                 $"'{SyncCoatingDisplayMaterialEffectRule.RgbDataKey}' is missing or not a double[3].");
         }
 
+        var usedDefault = instruction.Data.TryGetValue(SyncCoatingDisplayMaterialEffectRule.UsedDefaultDataKey, out var usedDefaultValue)
+            && usedDefaultValue is true;
+
         try
         {
             var ufSession = _context.UFSession;
@@ -71,6 +74,16 @@ public sealed class DisplayMaterialHelper
             AssignToBody(ufSession, body, materialTag);
             ApplyCoatingColor(ufSession, body, rgb);
             RefreshMaterialDisplay(ufSession, materialTag);
+
+            if (usedDefault)
+            {
+                _context.Log.Warn(
+                    $"Body '{BodyResolver.GetBodyId(body)}': material has no coating properties defined — applied default display material '{name}' instead.");
+            }
+            else
+            {
+                _context.Log.Info($"Body '{BodyResolver.GetBodyId(body)}': assigned display material '{name}' (tag {materialTag}).");
+            }
 
             return OperationResult.Success();
         }

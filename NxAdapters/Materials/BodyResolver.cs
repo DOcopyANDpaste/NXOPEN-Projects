@@ -24,7 +24,20 @@ public sealed class BodyResolver
         foreach (Body body in _context.WorkPart.Bodies)
         {
             bodies.Add(body);
-            byId[GetBodyId(body)] = body;
+
+            var id = GetBodyId(body);
+            if (byId.ContainsKey(id))
+            {
+                _context.Log.Warn(
+                    $"TRACE Body '{body.Name}' (JournalIdentifier='{body.JournalIdentifier}', Tag={body.Tag}) collides with an already-scanned body on BodyId '{id}' — the earlier body will be overwritten in the lookup.");
+            }
+            else
+            {
+                _context.Log.Info(
+                    $"TRACE Body '{body.Name}' (JournalIdentifier='{body.JournalIdentifier}', Tag={body.Tag}) -> BodyId '{id}'.");
+            }
+
+            byId[id] = body;
         }
 
         _bodiesById = byId;

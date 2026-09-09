@@ -56,7 +56,8 @@ public static class MaterialAssignmentCommand
         // accessor can be handed it straight away — it resolves its blocks later, from initialize_cb.
         var dialog = new BlockUI();
         var blocks = new BlockAccessor(dialog.TheDialog, bodyResolver, context.Log.Warn);
-        var propertyWindow = new MaterialPropertyWindow(context.Log.Warn);
+        // var propertyWindow = new MaterialPropertyWindow(context.Log.Warn);
+        var propertyWindow = new WinFormsMaterialPropertyWindow(context.Log.Warn);
         var presenter = new MaterialAssignmentDialogPresenter(
             context,
             blocks,
@@ -75,6 +76,7 @@ public static class MaterialAssignmentCommand
         }
         finally
         {
+            propertyWindow.Dispose(); // closes any still-open property popups before the main dialog goes away
             dialog.Dispose();
         }
     }

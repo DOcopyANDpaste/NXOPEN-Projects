@@ -26,6 +26,7 @@ public sealed class MaterialPropDisplayAccessor
     private readonly Tree? _tree;
     private readonly TreeBinding<MaterialPropertyValue>? _properties;
     private readonly Action<string>? _logWarning;
+    private bool _columnsReady;
 
     public MaterialPropDisplayAccessor(CompositeBlock topBlock, Action<string>? logWarning = null)
     {
@@ -38,11 +39,22 @@ public sealed class MaterialPropDisplayAccessor
     }
 
     /// <summary>Creates the property tree's columns. Called from the host dialog's <c>dialogShown</c>, for the
-    /// same reason the main dialog does it there — columns inserted during initialize do not take.</summary>
+    /// same reason the main dialog does it there — columns inserted during initialize do not take. Guarded
+    /// against being called twice: the main dialog's <see cref="BlockAccessor"/> needed the same guard because
+    /// <c>dialogShown_cb</c> is confirmed, empirically, to fire more than once per dialog — inserting a
+    /// duplicate column id throws.</summary>
+    /// <remarks>See the <c>NodeState</c>/<c>EnsureNodeColumns</c> guard in <c>NxAdapters.Ui.BlockAccessor</c>
+    /// for the main dialog's equivalent.</remarks>
     public void SetUpColumns()
     {
         if (_tree is null)
             return;
+
+        if (_columnsReady)
+        {
+            _logWarning?.Invoke("TRACE MaterialPropDisplayAccessor.SetUpColumns: dialogShown fired again; skipping repeat column setup.");
+            return;
+        }
 
         _tree.InsertColumn(PropertyColumn.Name, "Property", 220);
         _tree.InsertColumn(PropertyColumn.Value, "Value", 200);
@@ -50,6 +62,8 @@ public sealed class MaterialPropDisplayAccessor
 
         foreach (var column in new[] { PropertyColumn.Name, PropertyColumn.Value, PropertyColumn.Unit })
             _tree.SetColumnResizePolicy(column, Tree.ColumnResizePolicy.ConstantWidth);
+
+        _columnsReady = true;
     }
 
     public void Show(Material material)

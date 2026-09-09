@@ -11,6 +11,11 @@ public class SyncCoatingDisplayMaterialEffectRuleTests
     private const string MaterialNamePropertyName = "CoatingStudioMaterialName";
     private const string ColorPropertyName = "CoatingVisualizationColor";
 
+    // CoatingPropertyReader is internal to Core, so its default constants aren't visible here — these mirror
+    // them (see DefaultDisplayMaterialName / DefaultDisplayMaterialRgb).
+    private const string DefaultDisplayMaterialName = "TODO_DEFAULT_DISPLAY_MATERIAL_NAME";
+    private static readonly double[] DefaultDisplayMaterialRgb = { 0.7, 0.7, 0.7 };
+
     private readonly SyncCoatingDisplayMaterialEffectRule _rule = new();
 
     private static MaterialPropertyValue NameProperty(string value) =>
@@ -51,7 +56,7 @@ public class SyncCoatingDisplayMaterialEffectRuleTests
     }
 
     [Fact]
-    public void GenerateEffects_NameMissing_ReturnsEmpty()
+    public void GenerateEffects_NameMissing_FallsBackToDefault()
     {
         var context = new MaterialAssignmentRuleContext(
             MakeMaterial("Coated Steel", properties: new[] { ColorProperty("255,128,0") }),
@@ -59,11 +64,14 @@ public class SyncCoatingDisplayMaterialEffectRuleTests
 
         var effects = _rule.GenerateEffects(context);
 
-        Assert.Empty(effects);
+        var effect = Assert.Single(effects);
+        Assert.Equal(DefaultDisplayMaterialName, effect.Data["DisplayMaterialName"]);
+        Assert.Equal(DefaultDisplayMaterialRgb, effect.Data[SyncCoatingDisplayMaterialEffectRule.RgbDataKey]);
+        Assert.True((bool)effect.Data[SyncCoatingDisplayMaterialEffectRule.UsedDefaultDataKey]);
     }
 
     [Fact]
-    public void GenerateEffects_ColorInvalid_ReturnsEmpty()
+    public void GenerateEffects_ColorInvalid_FallsBackToDefault()
     {
         var context = new MaterialAssignmentRuleContext(
             MakeMaterial("Coated Steel", properties: new[] { NameProperty("Chrome"), ColorProperty("not,a,color") }),
@@ -71,17 +79,21 @@ public class SyncCoatingDisplayMaterialEffectRuleTests
 
         var effects = _rule.GenerateEffects(context);
 
-        Assert.Empty(effects);
+        var effect = Assert.Single(effects);
+        Assert.Equal(DefaultDisplayMaterialName, effect.Data["DisplayMaterialName"]);
+        Assert.True((bool)effect.Data[SyncCoatingDisplayMaterialEffectRule.UsedDefaultDataKey]);
     }
 
     [Fact]
-    public void GenerateEffects_NoCoatingPropertiesAtAll_ReturnsEmpty()
+    public void GenerateEffects_NoCoatingPropertiesAtAll_FallsBackToDefault()
     {
         var context = new MaterialAssignmentRuleContext(
             MakeMaterial("Plain Steel"), MakeBody("b1"), null, Array.Empty<BodyInfo>());
 
         var effects = _rule.GenerateEffects(context);
 
-        Assert.Empty(effects);
+        var effect = Assert.Single(effects);
+        Assert.Equal(DefaultDisplayMaterialName, effect.Data["DisplayMaterialName"]);
+        Assert.True((bool)effect.Data[SyncCoatingDisplayMaterialEffectRule.UsedDefaultDataKey]);
     }
 }

@@ -16,6 +16,15 @@ internal static class CoatingPropertyReader
     public const string MaterialNamePropertyName = "CoatingStudioMaterialName";
     public const string ColorPropertyName = "CoatingVisualizationColor";
 
+    /// <summary>Fallback display material name used when a material's MatML doesn't define
+    /// <see cref="MaterialNamePropertyName"/>/<see cref="ColorPropertyName"/>. TODO: placeholder — replace
+    /// with the real default name.</summary>
+    public const string DefaultDisplayMaterialName = "TODO_DEFAULT_DISPLAY_MATERIAL_NAME";
+
+    /// <summary>Fallback display color (0-1 RGB) paired with <see cref="DefaultDisplayMaterialName"/>.
+    /// TODO: placeholder — replace with the real default RGB.</summary>
+    public static readonly double[] DefaultDisplayMaterialRgb = { 0.7, 0.7, 0.7 };
+
     public static MaterialPropertyValue? FindProperty(Material material, string propertyName) =>
         material.Properties.FirstOrDefault(p => string.Equals(p.Name, propertyName, StringComparison.OrdinalIgnoreCase));
 

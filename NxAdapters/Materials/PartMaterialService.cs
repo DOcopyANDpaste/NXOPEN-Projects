@@ -103,6 +103,8 @@ public sealed class PartMaterialService : IPartMaterialService
                 continue;
             }
 
+            _context.Log.Info($"TRACE Body '{assignment.BodyId}' resolved (JournalIdentifier='{body.JournalIdentifier}') for material '{assignment.MaterialId}'.");
+
             var resolved = ResolveMaterial(assignment.MaterialId);
             if (resolved is null)
             {
@@ -111,11 +113,11 @@ public sealed class PartMaterialService : IPartMaterialService
                 continue;
             }
 
-            var (libraryName, materialName) = resolved.Value;
+            var (libraryFullPath, materialName) = resolved.Value;
 
             // The material has to exist in the part before it can be assigned, which may mean a slow load
             // from the NX library. Failing here fails only this body — the rest of the plan still applies.
-            var physicalMaterial = _physicalMaterials.Resolve(libraryName, materialName, out var failureReason);
+            var physicalMaterial = _physicalMaterials.Resolve(libraryFullPath, materialName, out var failureReason);
             if (physicalMaterial is null)
             {
                 anyFailed = true;
@@ -141,6 +143,8 @@ public sealed class PartMaterialService : IPartMaterialService
                 continue;
             }
 
+            _context.Log.Info($"TRACE Body '{assignment.BodyId}' (JournalIdentifier='{body.JournalIdentifier}'): physical material '{materialName}' written; {assignment.SideEffects.Count} side-effect(s) queued.");
+
             foreach (var instruction in assignment.SideEffects)
             {
                 if (!_executors.TryGetValue(instruction.InstructionType, out var executor))
@@ -154,6 +158,10 @@ public sealed class PartMaterialService : IPartMaterialService
                 {
                     anyFailed = true;
                     _context.Log.Error($"Side effect '{instruction.InstructionType}' failed for body '{assignment.BodyId}': {result.ErrorCode} {result.Message}");
+                }
+                else
+                {
+                    _context.Log.Info($"TRACE Side effect '{instruction.InstructionType}' succeeded for body '{assignment.BodyId}'.");
                 }
             }
 
@@ -199,7 +207,7 @@ public sealed class PartMaterialService : IPartMaterialService
 
             try
             {
-                RemovePhysicalMaterial(_context.UFSession, body);
+                RemovePhysicalMaterial(body);
             }
             catch (NXException ex)
             {
@@ -231,15 +239,15 @@ public sealed class PartMaterialService : IPartMaterialService
     /// identifies materials by name, and MaterialId is the library's own id (e.g. a MatML "id" attribute),
     /// not the display name.
     ///
-    /// The library name comes back too because loading from NX's library needs it, and because both sides
-    /// read the same library files the NX library name is taken to be our library's display name.</summary>
-    private (string LibraryName, string MaterialName)? ResolveMaterial(MaterialId materialId)
+    /// The library's full file path comes back too because NX's LoadFromLibrary needs the on-disk MatML
+    /// file, not just the library's display name.</summary>
+    private (string LibraryFullPath, string MaterialName)? ResolveMaterial(MaterialId materialId)
     {
         foreach (var library in _resolutionLibraries)
         {
             var material = library.Materials.FirstOrDefault(candidate => candidate.Id == materialId);
             if (material is not null)
-                return (library.DisplayName, material.Name);
+                return (library.FilePath, material.Name);
         }
 
         return null;
@@ -374,14 +382,52 @@ public sealed class PartMaterialService : IPartMaterialService
     private static void WritePhysicalMaterial(PhysicalMaterial material, Body body) =>
         material.AssignObjects(new NXObject[] { body });
 
-    private static void RemovePhysicalMaterial(UFSession uf, Body body)
+    /// <summary>Removes the physical material from <paramref name="body"/> only. Neither managed-API call
+    /// unassigns a single object: PhysicalMaterial.UnassignObjects() named in the header does not exist in
+    /// NX 2412's managed API, and the deprecated UFSf.UnlinkMaterial does not actually remove the
+    /// assignment. UnassignAllObjects() is the only call that works, but it strips the material from every
+    /// body that shares it — so the siblings are gathered up front and the material is reassigned to them
+    /// afterward, leaving only the target body without it.</summary>
+    private void RemovePhysicalMaterial(Body body)
     {
-        // UFSf.UnlinkMaterial is deprecated (NX 2312), and the replacement the header names —
-        // PhysicalMaterial.UnassignObjects() — does not exist in NX 2412's managed API. The only managed
-        // unassign is UnassignAllObjects(), which strips the material from EVERY body using it. So this
-        // stays on the deprecated call deliberately: do not "modernize" it into the all-bodies version.
-#pragma warning disable CS0618 // deprecated with no working replacement — see above
-        uf.Sf.UnlinkMaterial(body.Tag);
-#pragma warning restore CS0618
+        var physicalMaterials = _context.WorkPart.MaterialManager.PhysicalMaterials;
+
+        PhysicalMaterial material;
+        try
+        {
+            material = physicalMaterials.AskMaterialOfObject(body);
+        }
+        catch (NXException)
+        {
+            // no physical material assigned — nothing to remove
+            return;
+        }
+
+        if (material is null)
+            return;
+
+        var siblings = _context.WorkPart.Bodies
+            .Cast<Body>()
+            .Where(other => !other.Tag.Equals(body.Tag) && HasMaterial(physicalMaterials, other, material))
+            .Cast<NXObject>()
+            .ToArray();
+
+        material.UnassignAllObjects();
+
+        if (siblings.Length > 0)
+            material.AssignObjects(siblings);
+    }
+
+    private static bool HasMaterial(PhysicalMaterialCollection physicalMaterials, Body body, PhysicalMaterial material)
+    {
+        try
+        {
+            return physicalMaterials.AskMaterialOfObject(body)?.Tag.Equals(material.Tag) == true;
+        }
+        catch (NXException)
+        {
+            return false;
+            
+        }
     }
 }

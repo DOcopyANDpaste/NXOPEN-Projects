@@ -23,10 +23,11 @@ using NXOpen.BlockStyler;
 
 // ============================================================================================
 // >>> HAND-EDITED. THE BLOCK UI STYLER OVERWRITES THIS FILE. RE-ADD ALL OF THIS AFTER EVERY
-// >>> REGENERATION. Three edits, each banner-marked below:
+// >>> REGENERATION. Four edits, each banner-marked below:
 // >>>   1. #nullable disable + namespace         (immediately below)
 // >>>   2. DialogShown hook + Show()             (top of the class)
 // >>>   3. dialogShown_cb -> DialogShown?.Invoke()
+// >>>   4. constructor catch: `throw;` not `throw ex;` (preserves the original stack trace)
 // >>> Do NOT uncomment the tree handler stubs — MaterialPropDisplayAccessor drives the tree.
 // ============================================================================================
 
@@ -41,8 +42,13 @@ namespace NxAdapters.Ui.MaterialPropDisplay;
 public class MaterialDisplay_UIBlock
 {
     // >>> HAND-EDITED (2/3): popup hooks <<<
-    // This .dlx doubles as the material-property popup — it carries its own OK/Apply/Cancel navigation, so
-    // it can be launched directly rather than being embedded in a separate host dialog.
+    // This .dlx doubles as the material-property popup — it carries its own OK/Cancel navigation, so it
+    // can be launched directly rather than being embedded in a separate host dialog. NavigationStyle is
+    // deliberately "OK Cancel", not "OK Apply Cancel": this is a read-only viewer with nothing to apply,
+    // and NXOpen's BlockDialog.Apply is architecturally unable to close the dialog (PerformApply()
+    // "restarts" it; the only APIs that could force a close, PerformOK/PerformCancel, are documented as
+    // unsafe to call from the same thread the dialog callbacks run on) — so an Apply button here could
+    // never return to the caller. Do not re-add Apply without a real reason to edit material data.
 
     /// <summary>Raised just before the dialog is shown, which is the only point at which TopBlock's
     /// contents are built and so the earliest the tree can be given columns and content.</summary>
@@ -74,11 +80,13 @@ public class MaterialDisplay_UIBlock
             theUserDefinedUIBlock.AddInitializeHandler(new NXOpen.BlockStyler.BlockDialog.Initialize(initialize_cb));
             theUserDefinedUIBlock.AddDialogShownHandler(new NXOpen.BlockStyler.BlockDialog.DialogShown(dialogShown_cb));
         }
-        catch (Exception ex)
+        // >>> HAND-EDITED (4/4): preserve stack trace <<<
+        catch (Exception)
         {
             //---- Enter your exception handling code here -----
-            throw ex;
+            throw;
         }
+        // >>> END HAND-EDITED (4/4) <<<
     }
     //------------------------------------------------------------------------------
     

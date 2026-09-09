@@ -38,12 +38,14 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         public const int SelectBodies = 201;
         public const int RemoveMaterial = 202;
         public const int Refresh = 203;
+        public const int AddToBodySelection = 204;
     }
 
     private static class PendingMenu
     {
         public const int Remove = 301;
         public const int ClearAll = 302;
+        public const int ApplyAll = 303;
     }
 
     private readonly NxSessionContext _context;
@@ -92,6 +94,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     public void OnDialogShown()
     {
+        _blocks.ClearHighlight();
         _blocks.SetUpColumns();
 
         _libraries = _libraryRepository.ListAvailableLibraries();
@@ -125,6 +128,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 // case where NX signals the switch through update_cb instead. SetUpColumns is idempotent
                 // per page, so it's harmless if both paths end up firing.
                 _blocks.SetUpColumns();
+                _blocks.ClearHighlight();
                 break;
         }
     }
@@ -138,16 +142,30 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return 1;
         }
 
+        CommitPending();
+        return 0;
+    }
+
+    // Unlike OnApply, an empty pending list on OK is a normal end state (e.g. every assignment was made via
+    // "Assign now", which never touches _pending) — not something worth blocking the dialog's close on.
+    public int OnOk()
+    {
+        if (_pending.Count > 0)
+            CommitPending();
+
+        _blocks.ClearHighlight();
+        return 0;
+    }
+
+    private void CommitPending()
+    {
         // Snapshot: committing refreshes state, which rebuilds _pending.
         foreach (var entry in _pending.ToList())
             CommitEntry(entry);
 
         _pending.Clear();
         OnRefreshClicked();
-        return 0;
     }
-
-    public int OnOk() => OnApply();
 
     public void OnCancel()
     {
@@ -230,6 +248,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     public void OnMaterialHovered(Material? material) => _blocks.SetMaterialLabel(material ?? _selectedMaterial);
 
     public void OnAssignmentSelected(AssignmentRowRef? row) => _blocks.SetAssignmentLabel(row);
+
+    public void OnAssignmentDefaultAction(AssignmentRowRef row) => AddSolidBodiesToSelection(row.Bodies);
 
     public void OnPendingSelected(PendingRowRef? row) => _blocks.SetPendingLabel(row);
 
@@ -344,10 +364,12 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return new[] { new TreeMenuItem(AssignmentMenu.Refresh, "Refresh") };
 
         var isUnassigned = clicked.Row.IsUnassignedBucket;
+        var hasSolidBody = clicked.Bodies.Any(b => b.Kind == BodyKind.Solid);
 
         return new[]
         {
             new TreeMenuItem(AssignmentMenu.SelectBodies, "Select these bodies"),
+            new TreeMenuItem(AssignmentMenu.AddToBodySelection, "Add all to body selection", hasSolidBody),
             new TreeMenuItem(AssignmentMenu.RemoveMaterial, "Remove material", !isUnassigned),
             TreeMenuItem.Separator,
             new TreeMenuItem(AssignmentMenu.Refresh, "Refresh"),
@@ -366,10 +388,30 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             case AssignmentMenu.SelectBodies:
                 _blocks.SetSelectedBodies(bodyIds);
                 return;
+            case AssignmentMenu.AddToBodySelection:
+                AddSolidBodiesToSelection(targets.SelectMany(t => t.Bodies));
+                return;
             case AssignmentMenu.RemoveMaterial:
                 RemoveMaterialFrom(bodyIds);
                 return;
         }
+    }
+
+    /// <summary>Unions the solid bodies among <paramref name="bodies"/> into the body-selection box, leaving
+    /// whatever was already selected in place. Used by both the current-assignment tree's double-click and its
+    /// "Add all to body selection" menu command.</summary>
+    private void AddSolidBodiesToSelection(IEnumerable<BodyInfo> bodies)
+    {
+        var solidIds = bodies.Where(b => b.Kind == BodyKind.Solid).Select(b => b.Id).ToList();
+        if (solidIds.Count == 0)
+        {
+            _blocks.ShowError("None of the selected rows have a solid body.");
+            return;
+        }
+
+        var current = _blocks.GetSelectedBodyIds().ToHashSet();
+        current.UnionWith(solidIds);
+        _blocks.SetSelectedBodies(current.ToList());
     }
 
     private void RemoveMaterialFrom(IReadOnlyList<BodyId> bodyIds)
@@ -397,6 +439,18 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         if (clicked is null)
             return new[] { clearAll };
 
+        // "Apply all" only makes sense for a whole material entry, not one body within it.
+        if (clicked.Row is null)
+        {
+            return new[]
+            {
+                new TreeMenuItem(PendingMenu.ApplyAll, $"Apply all ({clicked.Entry.Material.Name})"),
+                new TreeMenuItem(PendingMenu.Remove, "Remove from pending"),
+                TreeMenuItem.Separator,
+                clearAll,
+            };
+        }
+
         return new[]
         {
             new TreeMenuItem(PendingMenu.Remove, "Remove from pending"),
@@ -413,6 +467,11 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 _pending.Clear();
                 break;
 
+            case PendingMenu.ApplyAll:
+                // Commits and re-renders on its own (via OnRefreshClicked), unlike the cases below.
+                ApplyAllPending(targets);
+                return;
+
             case PendingMenu.Remove:
                 // A root row removes the whole entry; a body row removes just that body from it.
                 foreach (var entry in targets.Where(t => t.Row is null).Select(t => t.Entry).Distinct().ToList())
@@ -428,6 +487,24 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         }
 
         _blocks.PopulatePendingTree(_pending);
+    }
+
+    /// <summary>Commits every targeted root/material entry immediately, the same way OK/Apply would, then
+    /// drops it from the pending list. Body rows within <paramref name="targets"/> are ignored — applying one
+    /// body out of a staged entry isn't what "Apply all" for a material means.</summary>
+    private void ApplyAllPending(IReadOnlyList<PendingRowRef> targets)
+    {
+        var entries = targets.Where(t => t.Row is null).Select(t => t.Entry).Distinct().ToList();
+        if (entries.Count == 0)
+            return;
+
+        foreach (var entry in entries)
+        {
+            CommitEntry(entry);
+            _pending.Remove(entry);
+        }
+
+        OnRefreshClicked();
     }
 
     // ---- Planning and committing ----
@@ -535,7 +612,9 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return;
         }
 
+        _context.Log.Info($"TRACE ShowProperties: opening property window for '{material.Name}'.");
         _propertyWindow.Show(material);
+        _context.Log.Info("TRACE ShowProperties: property window returned control to the main dialog.");
     }
 
     // ---- State refresh ----

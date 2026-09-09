@@ -11,11 +11,21 @@ namespace NxAdapters.Ui.MaterialPropDisplay;
 /// Properties).
 ///
 /// <c>MaterialDisplay_UIBlock.dlx</c> doubles as this popup: it is authored as a user-defined UI block so it
-/// can also be embedded elsewhere, but it carries its own OK/Apply/Cancel navigation, so it is launched
-/// directly rather than being registered into a separate host dialog.
+/// can also be embedded elsewhere, but it carries its own OK/Cancel navigation, so it is launched
+/// directly rather than being registered into a separate host dialog. No Apply button: both OK and Cancel
+/// close the popup and return here (NXOpen closes a BlockDialog by default on either), which Apply cannot
+/// do by design — see the note on <see cref="MaterialDisplay_UIBlock"/>.
 ///
 /// A fresh instance per invocation, disposed on close — the popup is modal and short-lived, and holding one
-/// open across invocations would carry a previous material's tree contents into the next one.</summary>
+/// open across invocations would carry a previous material's tree contents into the next one.
+///
+/// This launches a second, unparented top-level <see cref="NXOpen.BlockStyler.BlockDialog"/> from inside a
+/// tree callback of the main dialog's own still-running <c>Launch()</c> — NXOpen's <c>UI.CreateDialog</c> has
+/// no way to declare an owner relationship between the two. If tracing ever shows the main dialog's
+/// <c>Launch()</c> returning unexpectedly during/after this popup's Cancel, stop launching
+/// <see cref="MaterialDisplay_UIBlock"/> as an independent dialog and register it as a child block into the
+/// main dialog instead, via the already-present but unused
+/// <see cref="MaterialDisplay_UIBlock.RegisterUserDefinedUIBlock"/>.</summary>
 public sealed class MaterialPropertyWindow : IMaterialPropertyWindow
 {
     private readonly Action<string>? _logWarning;
@@ -39,7 +49,9 @@ public sealed class MaterialPropertyWindow : IMaterialPropertyWindow
                 accessor.Show(material);
             };
 
-            block.Show();
+            _logWarning?.Invoke($"TRACE MaterialPropertyWindow.Show: launching popup for '{material.Name}'.");
+            var response = block.Show();
+            _logWarning?.Invoke($"TRACE MaterialPropertyWindow.Show: popup closed with response '{response}'.");
         }
         catch (Exception ex)
         {

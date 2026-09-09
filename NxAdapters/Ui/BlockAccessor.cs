@@ -109,6 +109,11 @@ public sealed class BlockAccessor
     private TreeBinding<AssignmentRowRef>? _assignments;
     private TreeBinding<PendingRowRef>? _pending;
 
+    /// <summary>Bodies currently highlighted in the graphics window because a current-assignment or pending
+    /// tree row is selected. Kept separate from the <see cref="SelectedBodiesId"/> block/<see cref="SetSelectedBodies"/> —
+    /// this is transient visual feedback for browsing the trees, not the assignment target.</summary>
+    private readonly Dictionary<BodyId, Body> _highlightedBodies = new();
+
     /// <summary>Per-tab-page construction state. Under the dialog's old Explorer container,
     /// <c>dialogShown_cb</c> fired again every time the user switched node (confirmed empirically —
     /// SetUpColumns re-ran on every node change); with TabControl, the presenter's OnUpdate also calls
@@ -197,7 +202,17 @@ public sealed class BlockAccessor
             _assignments = new TreeBinding<AssignmentRowRef>(_currentAssignmentTree);
             _currentAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
                 Safe("currentAssignmentTree.OnSelect", () =>
-                    sink.OnAssignmentSelected(selected ? _assignments!.Resolve(node) : null)));
+                {
+                    sink.OnAssignmentSelected(selected ? _assignments!.Resolve(node) : null);
+                    SyncHighlight(_assignments!.ResolveSelected().SelectMany(r => r.Bodies).Select(b => b.Id));
+                }));
+            _currentAssignmentTree.SetOnDefaultActionHandler((_, node, _) =>
+                Safe("currentAssignmentTree.OnDefaultAction", () =>
+                {
+                    var row = _assignments!.Resolve(node);
+                    if (row is not null)
+                        sink.OnAssignmentDefaultAction(row);
+                }));
             _currentAssignmentTree.SetOnMenuHandler((tree, node, _) =>
                 Safe("currentAssignmentTree.OnMenu", () => ShowMenu(tree, sink.BuildAssignmentMenu(_assignments!.Resolve(node)))));
             _currentAssignmentTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
@@ -211,7 +226,12 @@ public sealed class BlockAccessor
             _pending = new TreeBinding<PendingRowRef>(_pendingAssignmentTree);
             _pendingAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
                 Safe("pendingAssignmentTree.OnSelect", () =>
-                    sink.OnPendingSelected(selected ? _pending!.Resolve(node) : null)));
+                {
+                    sink.OnPendingSelected(selected ? _pending!.Resolve(node) : null);
+                    SyncHighlight(_pending!.ResolveSelected()
+                        .SelectMany(r => r.Row is null ? r.Entry.Rows.Select(x => x.Body) : new[] { r.Row.Body })
+                        .Select(b => b.Id));
+                }));
             _pendingAssignmentTree.SetOnMenuHandler((tree, node, _) =>
                 Safe("pendingAssignmentTree.OnMenu", () => ShowMenu(tree, sink.BuildPendingMenu(_pending!.Resolve(node)))));
             _pendingAssignmentTree.SetOnMenuSelectionHandler((_, node, menuItemId) =>
@@ -543,6 +563,37 @@ public sealed class BlockAccessor
 
         return string.IsNullOrWhiteSpace(row.Message) ? label : $"{label} — {row.Message}";
     }
+
+    // ---- Tree selection highlight ----
+
+    /// <summary>Highlights exactly <paramref name="bodyIds"/> in the graphics window, unhighlighting whatever
+    /// was highlighted before that isn't in the new set. Driven off the live tree selection on every select
+    /// event, so it stays correct for both single- and multi-select.</summary>
+    private void SyncHighlight(IEnumerable<BodyId> bodyIds)
+    {
+        var ids = bodyIds.ToHashSet();
+
+        foreach (var stale in _highlightedBodies.Keys.Where(id => !ids.Contains(id)).ToList())
+        {
+            _highlightedBodies[stale].Unhighlight();
+            _highlightedBodies.Remove(stale);
+        }
+
+        foreach (var id in ids)
+        {
+            if (_highlightedBodies.ContainsKey(id))
+                continue;
+            if (_bodyResolver.TryResolve(id, out var body))
+            {
+                body.Highlight();
+                _highlightedBodies[id] = body;
+            }
+        }
+    }
+
+    /// <summary>Clears any tree-selection highlight — called on tab switch and dialog close so it never
+    /// outlives the context it was shown for.</summary>
+    public void ClearHighlight() => SyncHighlight(Array.Empty<BodyId>());
 
     // ---- Body selection block ----
 
