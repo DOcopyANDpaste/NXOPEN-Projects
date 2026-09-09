@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace Core.MaterialLibrary;
+namespace BAMaterial.Core.MaterialLibrary;
 
 /// <summary>One node of the nested material-category tree the dialog's material browser renders.
 /// <see cref="Segment"/> is the raw class-hierarchy segment this node was created from and is what

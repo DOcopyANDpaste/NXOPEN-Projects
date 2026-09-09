@@ -1,7 +1,7 @@
-using Core.Bodies;
+using BAMaterial.Core.Bodies;
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 /// <summary>Everything a rule needs to evaluate one (body, requested material) pair.
 /// <see cref="AllTargetBodiesInBatch"/> gives rules visibility into the whole Apply batch for

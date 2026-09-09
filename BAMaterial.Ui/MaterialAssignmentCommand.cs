@@ -1,6 +1,6 @@
-using Core.Assignment;
-using Core.Assignment.Rules;
-using Core.MaterialLibrary;
+using BAMaterial.Core.Assignment;
+using BAMaterial.Core.Assignment.Rules;
+using BAMaterial.Core.MaterialLibrary;
 using NXOpen;
 using NxAdapters.Materials;
 using NxAdapters.Ui;

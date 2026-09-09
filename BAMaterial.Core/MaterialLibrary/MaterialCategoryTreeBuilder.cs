@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace Core.MaterialLibrary;
+namespace BAMaterial.Core.MaterialLibrary;
 
 public sealed class MaterialCategoryTreeBuilder : IMaterialCategoryTreeBuilder
 {

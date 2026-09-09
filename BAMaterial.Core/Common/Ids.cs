@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Contracts.Common;
 
-namespace Core.Common;
+namespace BAMaterial.Core.Common;
 
 public readonly record struct BodyId(string Value) : IStronglyTypedId<string>
 {

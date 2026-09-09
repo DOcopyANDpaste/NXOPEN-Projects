@@ -1,8 +1,8 @@
-using Core.Assignment;
-using Core.Common;
+using BAMaterial.Core.Assignment;
+using BAMaterial.Core.Common;
 using NxOpen.Foundation.Contracts.Common;
 
-namespace Core.Bodies;
+namespace BAMaterial.Core.Bodies;
 
 /// <summary>Seam to the NX work part. Implemented by NxAdapters; Core never touches NXOpen types.
 /// <see cref="GetBodies"/> and <see cref="GetCurrentAssignments"/> are always a fresh rescan of the

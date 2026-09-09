@@ -1,4 +1,4 @@
-namespace Core.Assignment.Rules;
+namespace BAMaterial.Core.Assignment.Rules;
 
 /// <summary>Emits an ASSIGN_DISPLAY_MATERIAL instruction carrying the coating's display material name
 /// and RGB, for the adapter layer to look up/create the display material in NX and assign it to the

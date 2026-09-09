@@ -1,7 +1,7 @@
-using Core.Common;
+using BAMaterial.Core.Common;
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 /// <summary>All rule outcomes for one body under one requested material assignment.</summary>
 public sealed record BodyAssignmentEvaluation(

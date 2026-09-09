@@ -1,6 +1,6 @@
-using Core.Common;
+using BAMaterial.Core.Common;
 
-namespace Core.Bodies;
+namespace BAMaterial.Core.Bodies;
 
 public enum BodyKind
 {

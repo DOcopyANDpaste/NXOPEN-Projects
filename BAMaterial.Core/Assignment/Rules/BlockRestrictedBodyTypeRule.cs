@@ -1,7 +1,7 @@
-using Core.Bodies;
+using BAMaterial.Core.Bodies;
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace Core.Assignment.Rules;
+namespace BAMaterial.Core.Assignment.Rules;
 
 /// <summary>Sheet-metal-specific material libraries are exclusive to sheet bodies: a sheet-metal-library
 /// material can only go on a sheet body, and a sheet body can only take materials from a sheet-metal

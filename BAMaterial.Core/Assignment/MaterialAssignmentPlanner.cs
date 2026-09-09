@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 /// <summary>Runs the ordered gate rules for every body in the batch and produces a pure
 /// <see cref="AssignmentPlan"/> — no side effects, no NX calls, nothing executed yet. A

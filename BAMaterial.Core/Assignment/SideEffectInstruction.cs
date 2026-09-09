@@ -1,6 +1,6 @@
-using Core.Common;
+using BAMaterial.Core.Common;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 /// <summary>An instruction for the adapter layer to carry out after a material is assigned to a body
 /// (e.g. syncing a physical property). <see cref="InstructionType"/> is a string discriminator rather

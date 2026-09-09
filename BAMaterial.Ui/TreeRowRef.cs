@@ -1,4 +1,4 @@
-using Core.Bodies;
+using BAMaterial.Core.Bodies;
 
 namespace NxAdapters.Ui;
 

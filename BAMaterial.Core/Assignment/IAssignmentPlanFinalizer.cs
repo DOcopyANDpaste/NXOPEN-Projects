@@ -1,7 +1,7 @@
-using Core.Common;
+using BAMaterial.Core.Common;
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 public interface IAssignmentPlanFinalizer : IPlanFinalizer<AssignmentPlan, MaterialAssignmentPlanningInput, BodyId, ExecutablePlan>
 {

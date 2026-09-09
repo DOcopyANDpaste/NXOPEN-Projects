@@ -1,5 +1,5 @@
-using Core.Assignment;
-using Core.Assignment.Rules;
+using BAMaterial.Core.Assignment;
+using BAMaterial.Core.Assignment.Rules;
 using NXOpen;
 using NXOpen.UF;
 using NxOpen.Foundation.Contracts.Common;

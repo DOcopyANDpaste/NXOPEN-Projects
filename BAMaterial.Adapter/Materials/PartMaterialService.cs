@@ -1,7 +1,7 @@
-using Core.Assignment;
-using Core.Bodies;
-using Core.Common;
-using Core.MaterialLibrary;
+using BAMaterial.Core.Assignment;
+using BAMaterial.Core.Bodies;
+using BAMaterial.Core.Common;
+using BAMaterial.Core.MaterialLibrary;
 using NXOpen;
 using NXOpen.UF;
 using NxOpen.Foundation.Contracts.Common;

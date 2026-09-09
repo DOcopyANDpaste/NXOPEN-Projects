@@ -1,6 +1,6 @@
-using Core.Common;
+using BAMaterial.Core.Common;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 /// <summary>The single atomic unit of work for one Apply click. The adapter layer wraps exactly one
 /// call to <c>IPartMaterialService.ApplyPlan</c> per <see cref="ExecutablePlan"/> in one NX undo mark,

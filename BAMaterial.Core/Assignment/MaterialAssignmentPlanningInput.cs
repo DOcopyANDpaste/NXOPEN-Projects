@@ -1,8 +1,8 @@
-using Core.Bodies;
-using Core.Common;
+using BAMaterial.Core.Bodies;
+using BAMaterial.Core.Common;
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 public sealed record MaterialAssignmentPlanningInput(
     Material RequestedMaterial,

@@ -1,14 +1,14 @@
-using Core.Assignment;
-using Core.Assignment.Rules;
-using Core.Bodies;
-using Core.Common;
-using Core.MaterialLibrary;
+using BAMaterial.Core.Assignment;
+using BAMaterial.Core.Assignment.Rules;
+using BAMaterial.Core.Bodies;
+using BAMaterial.Core.Common;
+using BAMaterial.Core.MaterialLibrary;
 using NxOpen.Foundation.Contracts.Common;
 using NxOpen.Foundation.Contracts.Materials;
 using NxOpen.Foundation.Core.RuleEngine;
-using static Core.Tests.Assignment.TestFixtures;
+using static BAMaterial.Core.Tests.Assignment.TestFixtures;
 
-namespace Core.Tests.Assignment.Rules;
+namespace BAMaterial.Core.Tests.Assignment.Rules;
 
 public class ValidateCoatingDisplayMaterialRuleTests
 {

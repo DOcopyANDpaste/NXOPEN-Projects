@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace Core.Assignment.Rules;
+namespace BAMaterial.Core.Assignment.Rules;
 
 /// <summary>Validates the coating/studio display-material data on the requested material, and, when the
 /// target body already has a material assigned, cross-checks that against the body's actual current

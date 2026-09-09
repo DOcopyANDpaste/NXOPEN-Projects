@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 /// <summary>An effect rule: given an assignment that IS going to happen, produces side-effect
 /// instructions (e.g. "sync this physical property") for the adapter layer to execute. Core never

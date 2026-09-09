@@ -1,8 +1,8 @@
-using Core.MaterialLibrary;
+using BAMaterial.Core.MaterialLibrary;
 using NxOpen.Foundation.Contracts.Common;
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace Core.Tests.MaterialLibrary;
+namespace BAMaterial.Core.Tests.MaterialLibrary;
 
 public class MaterialCategoryTreeBuilderTests
 {

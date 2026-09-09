@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace Core.Assignment.Rules;
+namespace BAMaterial.Core.Assignment.Rules;
 
 /// <summary>If the body already has a different material assigned, require the user to confirm the
 /// overwrite before it proceeds.</summary>

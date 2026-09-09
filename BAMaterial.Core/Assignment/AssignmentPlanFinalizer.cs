@@ -1,6 +1,6 @@
-using Core.Common;
+using BAMaterial.Core.Common;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 /// <summary>Turns an <see cref="AssignmentPlan"/> plus the user's confirm/decline answers into the
 /// single atomic <see cref="ExecutablePlan"/> for one Apply click. Partial-apply semantics: blocked and

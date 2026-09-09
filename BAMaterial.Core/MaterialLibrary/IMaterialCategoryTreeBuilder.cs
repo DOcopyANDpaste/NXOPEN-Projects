@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace Core.MaterialLibrary;
+namespace BAMaterial.Core.MaterialLibrary;
 
 /// <summary>Builds the nested, sorted category tree the material browser renders. The UI layer makes zero
 /// grouping/sorting decisions of its own — it renders exactly what this returns.</summary>

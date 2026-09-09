@@ -1,8 +1,8 @@
-using Core.Common;
-using Core.MaterialLibrary;
+using BAMaterial.Core.Common;
+using BAMaterial.Core.MaterialLibrary;
 using NxOpen.Foundation.Contracts.Common;
 
-namespace Core.Bodies;
+namespace BAMaterial.Core.Bodies;
 
 /// <summary>The material currently assigned to a body, as read off the part. <see cref="MaterialName"/>
 /// is the raw name NX stores on the body; <see cref="ResolvedMaterialId"/> is populated only when that

@@ -1,4 +1,4 @@
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 /// <summary>Named constants for <see cref="SideEffectInstruction.InstructionType"/> values. The type is
 /// still a plain string (not an enum) so new instruction types never require editing

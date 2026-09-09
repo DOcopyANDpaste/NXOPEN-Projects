@@ -1,6 +1,6 @@
 using NxOpen.Foundation.Core.RuleEngine;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 public interface IMaterialAssignmentPlanner : IPlanner<MaterialAssignmentPlanningInput, AssignmentPlan>
 {

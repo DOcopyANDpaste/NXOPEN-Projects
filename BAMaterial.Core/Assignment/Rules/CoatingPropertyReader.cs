@@ -1,7 +1,7 @@
 using System.Globalization;
 using NxOpen.Foundation.Contracts.Materials;
 
-namespace Core.Assignment.Rules;
+namespace BAMaterial.Core.Assignment.Rules;
 
 /// <summary>Shared parsing for the two coating-related material properties, used by both
 /// <see cref="ValidateCoatingDisplayMaterialRule"/> and <see cref="SyncCoatingDisplayMaterialEffectRule"/>

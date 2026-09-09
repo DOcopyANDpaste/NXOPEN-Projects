@@ -1,4 +1,4 @@
-namespace Core.Assignment.Rules;
+namespace BAMaterial.Core.Assignment.Rules;
 
 /// <summary>Emits a SYNC_PHYSICAL_PROPERTY instruction per numeric property on the assigned material,
 /// carrying the raw value and its unit string as-is. Unit conversion is deliberately NOT done here —

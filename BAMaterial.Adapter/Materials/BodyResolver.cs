@@ -1,5 +1,5 @@
-using Core.Bodies;
-using Core.Common;
+using BAMaterial.Core.Bodies;
+using BAMaterial.Core.Common;
 using NXOpen;
 using NxOpen.Foundation.NxAdapters;
 

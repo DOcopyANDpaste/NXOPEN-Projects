@@ -1,7 +1,7 @@
-using Core.Common;
+using BAMaterial.Core.Common;
 using NxOpen.Foundation.Contracts.Common;
 
-namespace Core.Assignment;
+namespace BAMaterial.Core.Assignment;
 
 public sealed record ExecutableAssignment(
     BodyId BodyId,

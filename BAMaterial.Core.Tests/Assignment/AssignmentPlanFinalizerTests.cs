@@ -1,11 +1,11 @@
-using Core.Assignment;
-using Core.Bodies;
-using Core.Common;
+using BAMaterial.Core.Assignment;
+using BAMaterial.Core.Bodies;
+using BAMaterial.Core.Common;
 using NxOpen.Foundation.Contracts.Common;
 using NxOpen.Foundation.Core.RuleEngine;
-using static Core.Tests.Assignment.TestFixtures;
+using static BAMaterial.Core.Tests.Assignment.TestFixtures;
 
-namespace Core.Tests.Assignment;
+namespace BAMaterial.Core.Tests.Assignment;
 
 public class AssignmentPlanFinalizerTests
 {
