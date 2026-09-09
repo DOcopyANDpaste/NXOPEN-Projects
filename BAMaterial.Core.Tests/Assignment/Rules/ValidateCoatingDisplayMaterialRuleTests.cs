@@ -3,9 +3,9 @@ using BAMaterial.Core.Assignment.Rules;
 using BAMaterial.Core.Bodies;
 using BAMaterial.Core.Common;
 using BAMaterial.Core.MaterialLibrary;
-using NxOpen.Foundation.Contracts.Common;
-using NxOpen.Foundation.Contracts.Materials;
-using NxOpen.Foundation.Core.RuleEngine;
+using BANxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Core.RuleEngine;
 using static BAMaterial.Core.Tests.Assignment.TestFixtures;
 
 namespace BAMaterial.Core.Tests.Assignment.Rules;

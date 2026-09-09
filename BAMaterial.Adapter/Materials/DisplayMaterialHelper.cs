@@ -2,8 +2,8 @@ using BAMaterial.Core.Assignment;
 using BAMaterial.Core.Assignment.Rules;
 using NXOpen;
 using NXOpen.UF;
-using NxOpen.Foundation.Contracts.Common;
-using NxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.NxAdapters;
 
 namespace BAMaterial.Adapter.Materials;
 

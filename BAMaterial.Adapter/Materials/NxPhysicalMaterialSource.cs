@@ -1,5 +1,5 @@
 using NXOpen;
-using NxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.NxAdapters;
 
 namespace BAMaterial.Adapter.Materials;
 

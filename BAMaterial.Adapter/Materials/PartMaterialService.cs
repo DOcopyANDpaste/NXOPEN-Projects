@@ -4,9 +4,9 @@ using BAMaterial.Core.Common;
 using BAMaterial.Core.MaterialLibrary;
 using NXOpen;
 using NXOpen.UF;
-using NxOpen.Foundation.Contracts.Common;
-using NxOpen.Foundation.Contracts.Materials;
-using NxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.NxAdapters;
 
 namespace BAMaterial.Adapter.Materials;
 
@@ -20,7 +20,7 @@ public sealed class PartMaterialService : IPartMaterialService
     private readonly DisplayMaterialHelper _displayMaterialHelper;
     private readonly NxPhysicalMaterialSource _physicalMaterials;
     private readonly Dictionary<string, Func<SideEffectInstruction, Body, OperationResult>> _executors;
-    private IReadOnlyList<NxOpen.Foundation.Contracts.Materials.MaterialLibrary> _resolutionLibraries = Array.Empty<NxOpen.Foundation.Contracts.Materials.MaterialLibrary>();
+    private IReadOnlyList<BANxOpen.Foundation.Contracts.Materials.MaterialLibrary> _resolutionLibraries = Array.Empty<BANxOpen.Foundation.Contracts.Materials.MaterialLibrary>();
 
     public PartMaterialService(
         NxSessionContext context,
@@ -38,7 +38,7 @@ public sealed class PartMaterialService : IPartMaterialService
         };
     }
 
-    public void SetResolutionLibraries(IReadOnlyList<NxOpen.Foundation.Contracts.Materials.MaterialLibrary> libraries) =>
+    public void SetResolutionLibraries(IReadOnlyList<BANxOpen.Foundation.Contracts.Materials.MaterialLibrary> libraries) =>
         _resolutionLibraries = libraries;
 
     public IReadOnlyList<BodyInfo> GetBodies()

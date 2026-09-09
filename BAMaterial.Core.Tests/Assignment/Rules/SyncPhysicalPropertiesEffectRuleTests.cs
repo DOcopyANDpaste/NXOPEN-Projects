@@ -1,7 +1,7 @@
 using BAMaterial.Core.Assignment;
 using BAMaterial.Core.Assignment.Rules;
 using BAMaterial.Core.Bodies;
-using NxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Contracts.Materials;
 using static BAMaterial.Core.Tests.Assignment.TestFixtures;
 
 namespace BAMaterial.Core.Tests.Assignment.Rules;

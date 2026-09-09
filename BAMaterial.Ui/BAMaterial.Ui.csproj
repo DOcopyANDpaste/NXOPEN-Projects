@@ -29,9 +29,9 @@
          Core: MaterialLibraryParser, CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository,
                IMaterialLibraryLoader, RuleEngine.RuleOutcome.
          NxAdapters: NxSessionContext, NxListingLog. -->
-    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Contracts\NxOpen.Foundation.Contracts.csproj" />
-    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.Core\NxOpen.Foundation.Core.csproj" />
-    <ProjectReference Include="..\..\NxOpen.Foundation\src\NxOpen.Foundation.NxAdapters\NxOpen.Foundation.NxAdapters.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Contracts\BANxOpen.Foundation.Contracts.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core\BANxOpen.Foundation.Core.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.NxAdapters\BANxOpen.Foundation.NxAdapters.csproj" />
   </ItemGroup>
 
   <ItemGroup>

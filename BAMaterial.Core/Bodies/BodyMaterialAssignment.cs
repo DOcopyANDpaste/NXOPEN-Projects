@@ -1,6 +1,6 @@
 using BAMaterial.Core.Common;
 using BAMaterial.Core.MaterialLibrary;
-using NxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.Contracts.Common;
 
 namespace BAMaterial.Core.Bodies;
 

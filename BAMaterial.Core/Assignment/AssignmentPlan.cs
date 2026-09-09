@@ -1,4 +1,4 @@
-using NxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.Contracts.Common;
 
 namespace BAMaterial.Core.Assignment;
 

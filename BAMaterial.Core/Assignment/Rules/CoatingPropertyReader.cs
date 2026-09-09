@@ -1,5 +1,5 @@
 using System.Globalization;
-using NxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Contracts.Materials;
 
 namespace BAMaterial.Core.Assignment.Rules;
 

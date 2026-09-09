@@ -1,9 +1,9 @@
 using NXOpen;
-using NxOpen.Foundation.Contracts.Materials;
-using NxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.NxAdapters;
 
 // Disambiguated from NXOpen.Material, which `using NXOpen` above also brings into scope.
-using Material = NxOpen.Foundation.Contracts.Materials.Material;
+using Material = BANxOpen.Foundation.Contracts.Materials.Material;
 
 namespace BAMaterial.Ui.MaterialPropDisplay;
 

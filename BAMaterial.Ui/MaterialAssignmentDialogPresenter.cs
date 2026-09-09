@@ -2,9 +2,9 @@ using BAMaterial.Core.Assignment;
 using BAMaterial.Core.Bodies;
 using BAMaterial.Core.Common;
 using BAMaterial.Core.MaterialLibrary;
-using NxOpen.Foundation.Contracts.Materials;
-using NxOpen.Foundation.Core.MaterialLibrary;
-using NxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Core.MaterialLibrary;
+using BANxOpen.Foundation.NxAdapters;
 
 namespace BAMaterial.Ui;
 
@@ -59,7 +59,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     private readonly IMaterialPropertyWindow? _propertyWindow;
 
     private IReadOnlyList<MaterialLibraryReference> _libraries = Array.Empty<MaterialLibraryReference>();
-    private NxOpen.Foundation.Contracts.Materials.MaterialLibrary? _currentLibrary;
+    private BANxOpen.Foundation.Contracts.Materials.MaterialLibrary? _currentLibrary;
     private Material? _selectedMaterial;
     private IReadOnlyList<BodyInfo> _allBodies = Array.Empty<BodyInfo>();
     private IReadOnlyDictionary<BodyId, BodyMaterialAssignment> _currentAssignments =

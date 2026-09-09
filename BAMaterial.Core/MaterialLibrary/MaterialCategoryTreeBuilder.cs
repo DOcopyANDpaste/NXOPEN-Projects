@@ -1,10 +1,10 @@
-using NxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Contracts.Materials;
 
 namespace BAMaterial.Core.MaterialLibrary;
 
 public sealed class MaterialCategoryTreeBuilder : IMaterialCategoryTreeBuilder
 {
-    public IReadOnlyList<MaterialCategoryNode> Build(NxOpen.Foundation.Contracts.Materials.MaterialLibrary library)
+    public IReadOnlyList<MaterialCategoryNode> Build(BANxOpen.Foundation.Contracts.Materials.MaterialLibrary library)
     {
         var roots = new List<MutableNode>();
 

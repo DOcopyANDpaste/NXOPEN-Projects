@@ -1,6 +1,6 @@
 using BAMaterial.Core.Assignment;
 using BAMaterial.Core.Common;
-using NxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.Contracts.Common;
 
 namespace BAMaterial.Core.Bodies;
 
@@ -19,7 +19,7 @@ public interface IPartMaterialService
     /// <summary>Sets which loaded libraries physical-material names are best-effort matched against.
     /// Separate from <see cref="GetCurrentAssignments"/> because that takes no parameters — the caller
     /// re-registers whenever the library selection changes.</summary>
-    void SetResolutionLibraries(IReadOnlyList<NxOpen.Foundation.Contracts.Materials.MaterialLibrary> libraries);
+    void SetResolutionLibraries(IReadOnlyList<BANxOpen.Foundation.Contracts.Materials.MaterialLibrary> libraries);
 
     OperationResult ApplyPlan(ExecutablePlan plan);
 

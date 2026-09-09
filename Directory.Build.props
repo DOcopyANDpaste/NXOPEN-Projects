@@ -2,7 +2,7 @@
 
   <!--
     Auto-imported by every project under this repo root, and by nothing outside it, so the sibling
-    NxOpen.Foundation repo is unaffected even though projects here reference it.
+    BANxOpen.Foundation repo is unaffected even though projects here reference it.
 
     Only settings that are genuinely common to all four projects belong here. The NXOpen assembly
     references and the UGII_BASE_DIR guard deliberately do NOT: they live in build\Nx.References.props,

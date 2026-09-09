@@ -5,8 +5,8 @@ using NXOpen;
 using BAMaterial.Adapter.Materials;
 using BAMaterial.Ui;
 using BAMaterial.Ui.MaterialPropDisplay;
-using NxOpen.Foundation.Core.MaterialLibrary;
-using NxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Core.MaterialLibrary;
+using BANxOpen.Foundation.NxAdapters;
 
 namespace BAMaterial.Ui;
 

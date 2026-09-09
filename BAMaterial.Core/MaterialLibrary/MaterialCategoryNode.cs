@@ -1,4 +1,4 @@
-using NxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Contracts.Materials;
 
 namespace BAMaterial.Core.MaterialLibrary;
 
@@ -12,7 +12,7 @@ namespace BAMaterial.Core.MaterialLibrary;
 /// node like "Metals" holds no materials of its own, only child nodes. Both lists are already ordered for
 /// rendering, so the UI makes no sorting decisions of its own.
 ///
-/// Presentation-shaped, so it stays in this repo's Core rather than moving to NxOpen.Foundation with the
+/// Presentation-shaped, so it stays in this repo's Core rather than moving to BANxOpen.Foundation with the
 /// rest of the material-library reading module — only this tool's presenter consumes it.</summary>
 public sealed record MaterialCategoryNode(
     string Segment,

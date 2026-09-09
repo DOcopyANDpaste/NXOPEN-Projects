@@ -4,14 +4,14 @@ using BAMaterial.Core.MaterialLibrary;
 using NXOpen;
 using NXOpen.BlockStyler;
 using BAMaterial.Adapter.Materials;
-using NxOpen.Foundation.Contracts.Common;
-using NxOpen.Foundation.Contracts.Materials;
-using NxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.NxAdapters;
 
 // NXOpen ships its own Material (a part attribute) and SelectObject (a selection API type), both of which
 // collide with the ones meant here. Aliased rather than fully qualified at each use — this file mentions
 // them constantly.
-using Material = NxOpen.Foundation.Contracts.Materials.Material;
+using Material = BANxOpen.Foundation.Contracts.Materials.Material;
 using SelectObject = NXOpen.BlockStyler.SelectObject;
 
 namespace BAMaterial.Ui;
@@ -701,7 +701,7 @@ public sealed class BlockAccessor
     }
 
     // ---- Generic dialogs ----
-    // Forwards to the shared NxOpen.Foundation.NxAdapters.NxMessageBoxHelper — these three have no dependency
+    // Forwards to the shared BANxOpen.Foundation.NxAdapters.NxMessageBoxHelper — these three have no dependency
     // on this dialog's blocks or domain types, so the implementation lives once in the foundation instead of
     // being duplicated per project.
 

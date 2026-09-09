@@ -1,6 +1,6 @@
 using BAMaterial.Core.MaterialLibrary;
-using NxOpen.Foundation.Contracts.Common;
-using NxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Contracts.Common;
+using BANxOpen.Foundation.Contracts.Materials;
 
 namespace BAMaterial.Core.Tests.MaterialLibrary;
 
@@ -11,7 +11,7 @@ public class MaterialCategoryTreeBuilderTests
     private static Material MakeMaterial(string name, MaterialCategory category, MaterialId? id = null) =>
         new(id ?? new MaterialId(name), LibraryId, name, category, Array.Empty<MaterialPropertyValue>());
 
-    private static NxOpen.Foundation.Contracts.Materials.MaterialLibrary MakeLibrary(params Material[] materials) =>
+    private static BANxOpen.Foundation.Contracts.Materials.MaterialLibrary MakeLibrary(params Material[] materials) =>
         new(LibraryId, "Lib", materials);
 
     private static IReadOnlyList<MaterialCategoryNode> Build(params Material[] materials) =>

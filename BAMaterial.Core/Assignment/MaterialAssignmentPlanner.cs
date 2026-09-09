@@ -1,4 +1,4 @@
-using NxOpen.Foundation.Core.RuleEngine;
+using BANxOpen.Foundation.Core.RuleEngine;
 
 namespace BAMaterial.Core.Assignment;
 

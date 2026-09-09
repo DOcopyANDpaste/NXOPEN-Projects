@@ -1,7 +1,7 @@
 using System.Threading;
 using System.Windows.Forms;
-using NxOpen.Foundation.Contracts.Materials;
-using NxOpen.Foundation.NxAdapters;
+using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.NxAdapters;
 
 namespace BAMaterial.Ui.MaterialPropDisplay;
 

@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
-using NxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Contracts.Materials;
 
 namespace BAMaterial.Ui.MaterialPropDisplay;
 

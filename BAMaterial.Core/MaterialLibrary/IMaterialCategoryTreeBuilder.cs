@@ -1,4 +1,4 @@
-using NxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Foundation.Contracts.Materials;
 
 namespace BAMaterial.Core.MaterialLibrary;
 
@@ -7,5 +7,5 @@ namespace BAMaterial.Core.MaterialLibrary;
 public interface IMaterialCategoryTreeBuilder
 {
     /// <summary>The root nodes of the tree, in render order.</summary>
-    IReadOnlyList<MaterialCategoryNode> Build(NxOpen.Foundation.Contracts.Materials.MaterialLibrary library);
+    IReadOnlyList<MaterialCategoryNode> Build(BANxOpen.Foundation.Contracts.Materials.MaterialLibrary library);
 }
