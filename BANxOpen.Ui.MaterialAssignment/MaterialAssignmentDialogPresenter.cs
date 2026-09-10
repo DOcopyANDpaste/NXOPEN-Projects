@@ -187,9 +187,13 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     // ---- Quick selection buttons ----
 
+    /// <summary>Sheet metal bodies are solids in NX, so the solid-body shortcuts include them. Their own kind
+    /// exists only so the body-type rule can pair them with sheet metal libraries.</summary>
+    private static bool IsSolid(BodyInfo body) => body.Kind is BodyKind.Solid or BodyKind.SheetMetal;
+
     public void OnSelectAllSolidsClicked()
     {
-        var ids = _allBodies.Where(b => b.Kind == BodyKind.Solid).Select(b => b.Id).ToList();
+        var ids = _allBodies.Where(b => IsSolid(b)).Select(b => b.Id).ToList();
         _blocks.SetSelectedBodies(ids);
     }
 
@@ -201,7 +205,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             .ToHashSet();
 
         var ids = _allBodies
-            .Where(b => b.Kind == BodyKind.Solid && unassigned.Contains(b.Id))
+            .Where(b => IsSolid(b) && unassigned.Contains(b.Id))
             .Select(b => b.Id)
             .ToList();
 
@@ -364,7 +368,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return new[] { new TreeMenuItem(AssignmentMenu.Refresh, "Refresh") };
 
         var isUnassigned = clicked.Row.IsUnassignedBucket;
-        var hasSolidBody = clicked.Bodies.Any(b => b.Kind == BodyKind.Solid);
+        var hasSolidBody = clicked.Bodies.Any(b => IsSolid(b));
 
         return new[]
         {
@@ -402,7 +406,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     /// "Add all to body selection" menu command.</summary>
     private void AddSolidBodiesToSelection(IEnumerable<BodyInfo> bodies)
     {
-        var solidIds = bodies.Where(b => b.Kind == BodyKind.Solid).Select(b => b.Id).ToList();
+        var solidIds = bodies.Where(b => IsSolid(b)).Select(b => b.Id).ToList();
         if (solidIds.Count == 0)
         {
             _blocks.ShowError("None of the selected rows have a solid body.");
