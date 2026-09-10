@@ -7,6 +7,7 @@ using BANxOpen.Ui.MaterialAssignment;
 using BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.SheetMetal.NxAdapters.Common;
 
 namespace BANxOpen.Ui.MaterialAssignment;
 
@@ -53,10 +54,27 @@ public static class MaterialAssignmentCommand
         if (!sheetMetalLibraries.IsConfigured)
             context.Log.Info($"No {SheetMetalLibraries.FileName} at '{libraryRulesPath}'; sheet metal libraries are recognised by name.");
 
+        // Feature domains that restrict what material a body may take, given what is already built on it. Each
+        // domain contributes its providers in one line; add further domains here.
+        //
+        // Sheet metal config that cannot be loaded stops the dialog rather than dropping the bead rules: a
+        // dialog that silently stopped enforcing SPEC restrictions would assign forbidden materials to beaded
+        // parts, which is exactly what these rules exist to prevent.
+        var sheetMetal = SheetMetalServices.Create(context);
+        if (!sheetMetal.Ok)
+        {
+            UI.GetUI().NXMessageBox.Show(
+                "Material Assignment", NXMessageBox.DialogType.Error,
+                sheetMetal.Message ?? "Sheet metal configuration could not be loaded.");
+            return;
+        }
+
+        var constraintProviders = sheetMetal.Value!.ConstraintProviders;
+
         // The shared baseline, so this dialog and any feature tool that assigns material enforce exactly
         // the same rules. See StandardMaterialRules for what is in each set and why
         // SyncPhysicalPropertiesEffectRule is deliberately left out.
-        var planner = new MaterialAssignmentPlanner(StandardMaterialRules.Gates(sheetMetalLibraries: sheetMetalLibraries));
+        var planner = new MaterialAssignmentPlanner(StandardMaterialRules.Gates(constraintProviders, sheetMetalLibraries));
         var finalizer = new AssignmentPlanFinalizer(StandardMaterialRules.Effects());
 
         // The Styler-generated dialog. Constructing it creates the BlockDialog from BlockUI.dlx, so the

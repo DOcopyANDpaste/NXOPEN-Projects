@@ -574,7 +574,20 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         var confirmedBodyIds = GetConfirmedBodyIds(entry);
         var executablePlan = _finalizer.Finalize(entry.Plan, entry.Input, confirmedBodyIds);
         var result = _partMaterialService.ApplyPlan(executablePlan);
-        _blocks.ShowResult(result, $"{entry.Material.Name} applied to {executablePlan.Assignments.Count} body(ies).");
+
+        // Warnings never stop an assignment, but "Assign now" skips the pending tree where they would otherwise
+        // be seen — for example a bead on the body that matches no SPEC, whose restriction is therefore not
+        // enforced. They are appended to the result so the user learns of them either way.
+        var warnings = entry.Rows
+            .Where(r => r.Status == PendingBodyStatus.Ok && !string.IsNullOrWhiteSpace(r.Message))
+            .Select(r => $"[{r.Body.Name}] {r.Message}")
+            .ToList();
+
+        var summary = $"{entry.Material.Name} applied to {executablePlan.Assignments.Count} body(ies).";
+        if (warnings.Count > 0)
+            summary += $"{Environment.NewLine}{Environment.NewLine}Warnings:{Environment.NewLine}{string.Join(Environment.NewLine, warnings)}";
+
+        _blocks.ShowResult(result, summary);
 
         if (executablePlan.SkippedBlocked.Count > 0 || executablePlan.SkippedDeclinedConfirmation.Count > 0)
         {
