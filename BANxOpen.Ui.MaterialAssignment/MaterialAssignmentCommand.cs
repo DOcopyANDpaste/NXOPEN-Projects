@@ -1,5 +1,3 @@
-using BANxOpen.Foundation.Core.Materials;
-using BANxOpen.Foundation.Core.Materials.Assignment;
 using BANxOpen.Foundation.Core.Materials.Library;
 using NXOpen;
 using BANxOpen.Foundation.NxAdapters.Materials;
@@ -25,37 +23,8 @@ public static class MaterialAssignmentCommand
             return;
         }
 
-        var bodyResolver = new BodyResolver(context);
-        var displayMaterialHelper = new DisplayMaterialHelper(context);
-        // Owns the only path that touches NX's own material library, which is slow — see the class doc for
-        // why that happens lazily, per material, and only after asking.
-        var physicalMaterials = new NxPhysicalMaterialSource(context);
-        var partMaterialService = new PartMaterialService(context, bodyResolver, displayMaterialHelper, physicalMaterials);
-
-        var libraryRepository = new FileSystemMaterialLibraryRepository(onWarning: context.Log.Warn);
-        var libraryParser = new MaterialLibraryParser();
-        var libraryLoader = new CachingMaterialLibraryLoader(libraryRepository, libraryParser);
-        var categoryTreeBuilder = new MaterialCategoryTreeBuilder();
-
-        // Which libraries are reserved for sheet metal bodies. Read from beside the library files so this dialog
-        // and the bead dialog apply the same list. A broken file stops the dialog rather than being ignored.
-        SheetMetalLibraries sheetMetalLibraries;
-        var libraryRulesPath = SheetMetalLibraries.ResolvePath(libraryRepository.RootDirectory);
-        try
-        {
-            sheetMetalLibraries = SheetMetalLibraries.Load(libraryRulesPath);
-        }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
-        {
-            UI.GetUI().NXMessageBox.Show("Material Assignment", NXMessageBox.DialogType.Error, ex.Message);
-            return;
-        }
-
-        if (!sheetMetalLibraries.IsConfigured)
-            context.Log.Info($"No {SheetMetalLibraries.FileName} at '{libraryRulesPath}'; sheet metal libraries are recognised by name.");
-
-        // Feature domains that restrict what material a body may take, given what is already built on it. Each
-        // domain contributes its providers in one line; add further domains here.
+        // Feature domains that restrict what material a body may take, given what is already built on it, and that
+        // carry an assignment through to their own part state (sheet metal: bead SPECs and the Sheet Metal Preferences).
         //
         // Sheet metal config that cannot be loaded stops the dialog rather than dropping the bead rules: a
         // dialog that silently stopped enforcing SPEC restrictions would assign forbidden materials to beaded
@@ -69,13 +38,26 @@ public static class MaterialAssignmentCommand
             return;
         }
 
-        var constraintProviders = sheetMetal.Value!.ConstraintProviders;
+        var sheetMetalServices = sheetMetal.Value!;
 
-        // The shared baseline, so this dialog and any feature tool that assigns material enforce exactly
-        // the same rules. See StandardMaterialRules for what is in each set and why
-        // SyncPhysicalPropertiesEffectRule is deliberately left out.
-        var planner = new MaterialAssignmentPlanner(StandardMaterialRules.Gates(constraintProviders, sheetMetalLibraries));
-        var finalizer = new AssignmentPlanFinalizer(StandardMaterialRules.Effects());
+        var bodyResolver = new BodyResolver(context);
+        var libraryRepository = new FileSystemMaterialLibraryRepository(onWarning: context.Log.Warn);
+        var libraryParser = new MaterialLibraryParser();
+        var libraryLoader = new CachingMaterialLibraryLoader(libraryRepository, libraryParser);
+        var categoryTreeBuilder = new MaterialCategoryTreeBuilder();
+
+        // The shared material engine: the baseline rule modules plus each feature domain's, so this dialog and every
+        // feature tool that assigns material enforce exactly the same rules. Add further domains' modules here.
+        var engine = MaterialEngine.Create(
+            context, bodyResolver, libraryRepository.RootDirectory, sheetMetalServices.MaterialModules);
+        if (!engine.Ok)
+        {
+            UI.GetUI().NXMessageBox.Show(
+                "Material Assignment", NXMessageBox.DialogType.Error, engine.Message ?? "Material rules could not be loaded.");
+            return;
+        }
+
+        var materials = engine.Value!;
 
         // The Styler-generated dialog. Constructing it creates the BlockDialog from BlockUI.dlx, so the
         // accessor can be handed it straight away — it resolves its blocks later, from initialize_cb.
@@ -86,12 +68,12 @@ public static class MaterialAssignmentCommand
         var presenter = new MaterialAssignmentDialogPresenter(
             context,
             blocks,
-            partMaterialService,
+            materials.PartMaterials,
             libraryRepository,
             libraryLoader,
             categoryTreeBuilder,
-            planner,
-            finalizer,
+            materials.Rules.CreatePlanner(),
+            materials.Rules.CreateFinalizer(),
             propertyWindow);
 
         dialog.Presenter = presenter;
