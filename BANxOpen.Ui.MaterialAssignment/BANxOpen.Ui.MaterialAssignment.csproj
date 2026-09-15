@@ -1,0 +1,80 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Block UI Styler dialog + presenter + the NX entry point. This is the assembly NX loads:
+    BANxOpen.Ui.MaterialAssignment.dll, entry point BANxOpen.Ui.MaterialAssignment.MaterialAssignmentCommand.Main.
+
+    Everything that knows about BlockStyler or WinForms lives here and nowhere else, so that
+    BANxOpen.Foundation.Core.Materials and BANxOpen.Foundation.NxAdapters stay reusable from a batch
+    session or a different front end.
+
+    In NxMaterialAssignment.sln for IntelliSense, with NO Build.0 entry in any configuration.
+    Build it explicitly on an NX machine:
+    `dotnet build BANxOpen.Ui.MaterialAssignment\BANxOpen.Ui.MaterialAssignment.csproj`.
+  -->
+
+  <!-- NXOpen references + the UGII_BASE_DIR guard. NXOpenUI, which
+       carries NXOpen.BlockStyler, is the reference this project exists for. -->
+  <Import Project="..\build\Nx.References.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Contracts: Material, MaterialLibrary, MaterialLibraryReference, MaterialPropertyValue, BodyId.
+         Core: RuleEngine.RuleOutcome.
+         Core.Materials: the planner/finalizer/rules, IMaterialCategoryTreeBuilder, MaterialLibraryParser,
+               CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository, IMaterialLibraryLoader.
+         NxAdapters: NxSessionContext, NxListingLog, and Materials\ (PartMaterialService, BodyResolver,
+               DisplayMaterialHelper, NxPhysicalMaterialSource), formerly the BAMaterial.Adapter project. -->
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Contracts\BANxOpen.Foundation.Contracts.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core\BANxOpen.Foundation.Core.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core.Materials\BANxOpen.Foundation.Core.Materials.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.NxAdapters\BANxOpen.Foundation.NxAdapters.csproj" />
+    <!-- Sheet metal domain: referenced only so MaterialAssignmentCommand can register the bead SPEC constraint
+         provider with the material engine. Nothing else in this dialog uses sheet metal types, and no UI project
+         is referenced; the domain library is the only edge between this dialog and the bead tool. -->
+    <ProjectReference Include="..\..\BANxOpen.SheetMetal\src\BANxOpen.SheetMetal.Core\BANxOpen.SheetMetal.Core.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.SheetMetal\src\BANxOpen.SheetMetal.NxAdapters\BANxOpen.SheetMetal.NxAdapters.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Back the WinForms material property popup (MaterialPropDisplay/MaterialPropertyForm.cs and
+      WinFormsMaterialPropertyWindow.cs), the only two files in the repo that touch either assembly.
+      Deliberately declared here rather than in build\Nx.References.props so no headless project can
+      pick them up. This is a plain net48 TFM, not a "-windows"-suffixed one, so the SDK's
+      UseWindowsForms property does not apply (that is only for net5.0-windows+). Plain framework
+      References with no HintPath resolve the same way System/System.Core already do.
+    -->
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
+      Block UI Styler layout files. Not compiled and not embedded. A glob rather than a file list
+      because the Styler adds new .dlx files as the dialog grows.
+
+      IMPORTANT: copying these to bin\ does NOT by itself make NX find them. Both dialogs load their
+      layout by bare filename (BlockUI.cs "theDlxFileName = BlockUI.dlx", and likewise in
+      MaterialDisplay_UIBlock.cs), and NX resolves that against its own "application" search path
+      (%UGII_USER_DIR%\application, the application folders of any directory listed in the file at
+      %UGII_CUSTOM_DIRECTORY_FILE%, then the shipped location), NOT against the assembly's directory.
+      These items exist so the files are visible in Solution Explorer and so deploying is a copy of one
+      output folder rather than a hand-assembled file list. They must still land somewhere NX searches.
+
+      The .udx is only needed by the Styler at authoring time (it registers MaterialDisplay_UIBlock in
+      the User Defined UI Block palette); it is not required for the compiled dialog to run, but is
+      shipped anyway so a second developer can reopen the dialog in the Styler.
+
+      The Link metadata flattens them into the root of the output folder. Without it,
+      MaterialPropDisplay\MaterialDisplay_UIBlock.dlx would be copied to a matching subfolder, where a
+      bare-filename lookup would never find it.
+    -->
+    <None Include="**\*.dlx" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+    <None Include="**\*.udx" CopyToOutputDirectory="PreserveNewest" Link="%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

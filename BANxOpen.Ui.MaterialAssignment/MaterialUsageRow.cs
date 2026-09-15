@@ -1,0 +1,16 @@
+using BANxOpen.Foundation.Contracts.Common;
+
+namespace BANxOpen.Ui.MaterialAssignment;
+
+/// <summary>One row of the material-usage table: a distinct physical material name currently in use in
+/// the part (or the synthetic <see cref="UnassignedLabel"/> row for bodies with no physical material),
+/// plus how many bodies carry it. Presentation-only — derived at presenter level from
+/// <c>IPartMaterialService.GetCurrentAssignments()</c> + <c>GetBodies()</c>, not a shared Core domain type.
+/// Rendered as the root rows of <c>CurrentAssignmentTree</c>, with the row's bodies as children — see
+/// <see cref="AssignmentRowRef"/>.</summary>
+public sealed record MaterialUsageRow(string MaterialLabel, MaterialId? ResolvedMaterialId, int BodyCount)
+{
+    public const string UnassignedLabel = "(No material assigned)";
+
+    public bool IsUnassignedBucket => ResolvedMaterialId is null && string.Equals(MaterialLabel, UnassignedLabel, StringComparison.Ordinal);
+}

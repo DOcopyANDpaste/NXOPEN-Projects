@@ -4,7 +4,7 @@ The `nxopen-csharp-patterns` skill (architecture layering + coding conventions f
 now maintained once, centrally, for reuse across every NX Open project:
 
 ```
-..\NxOpen.Foundation\Skills\nxopen-csharp-patterns\
+..\BANxOpen.Foundation\Skills\nxopen-csharp-patterns\
     SKILL.md
     references\common.md
     references\with-block-ui.md
