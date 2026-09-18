@@ -2,6 +2,7 @@ using BANxOpen.Foundation.Core.Materials.Library;
 using NXOpen;
 using BANxOpen.Foundation.NxAdapters.Materials;
 using BANxOpen.Ui.MaterialAssignment;
+using BANxOpen.Ui.MaterialAssignment.AssignmentChoiceUi;
 using BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Materials;
@@ -65,6 +66,13 @@ public static class MaterialAssignmentCommand
         var blocks = new BlockAccessor(dialog.TheDialog, bodyResolver, context.Log.Warn);
         // var propertyWindow = new MaterialPropertyWindow(context.Log.Warn);
         var propertyWindow = new WinFormsMaterialPropertyWindow(context.Log.Warn);
+
+        // The questions the rules need answered before their side effects can run — for sheet metal, which
+        // standards file row the part's Sheet Metal Preferences should be set to. The collector and the window
+        // are handed over together: a dialog with one and not the other would either ask nothing and have its
+        // bodies skipped, or collect questions it could not put to anyone.
+        var choiceWindow = new WinFormsAssignmentChoiceWindow(context.Log.Warn);
+
         var presenter = new MaterialAssignmentDialogPresenter(
             context,
             blocks,
@@ -74,6 +82,10 @@ public static class MaterialAssignmentCommand
             categoryTreeBuilder,
             materials.Rules.CreatePlanner(),
             materials.Rules.CreateFinalizer(),
+            materials.Rules.CreateChoiceCollector(),
+            choiceWindow,
+            sheetMetalServices.StandardSelection,
+            materials.SheetMetalLibraries,
             propertyWindow);
 
         dialog.Presenter = presenter;

@@ -42,6 +42,7 @@ public sealed class BlockAccessor
     internal const string SelectAllButtonId = "selectAllButton";
     internal const string SelectUnassignedButtonId = "selectUnassignedButton";
     internal const string LibraryEnumId = "enum_MatLibrary";
+    internal const string StandardEnumId = "enum_SmStandard";
     internal const string MaterialTreeId = "MaterialTree";
     internal const string CurrentAssignmentTreeId = "CurrentAssignmentTree";
     internal const string PendingAssignmentTreeId = "PendingAssignments";
@@ -97,6 +98,7 @@ public sealed class BlockAccessor
 
     private SelectObject? _selectedBodies;
     private Enumeration? _libraryEnum;
+    private Enumeration? _standardEnum;
     private TabControl? _tabControl;
     private Tree? _materialTree;
     private Tree? _currentAssignmentTree;
@@ -133,6 +135,7 @@ public sealed class BlockAccessor
     private readonly NodeState _pendingNodeState = new();
 
     private IReadOnlyList<MaterialLibraryReference> _lastPopulatedLibraries = Array.Empty<MaterialLibraryReference>();
+    private IReadOnlyList<string> _lastPopulatedStandards = Array.Empty<string>();
 
     /// <param name="bodyResolver">Maps <see cref="BodyId"/> to the live NXOpen <see cref="Body"/> and back, so
     /// the selection block can be read and written in domain terms. Shared with
@@ -157,6 +160,7 @@ public sealed class BlockAccessor
 
         _selectedBodies = TryFindBlock<SelectObject>(SelectedBodiesId);
         _libraryEnum = TryFindBlock<Enumeration>(LibraryEnumId);
+        _standardEnum = TryFindBlock<Enumeration>(StandardEnumId);
         _tabControl = TryFindBlock<TabControl>(TabControlId);
         _materialTree = TryFindBlock<Tree>(MaterialTreeId);
         _currentAssignmentTree = TryFindBlock<Tree>(CurrentAssignmentTreeId);
@@ -398,18 +402,53 @@ public sealed class BlockAccessor
         }
     }
 
-    public MaterialLibraryId? GetSelectedLibraryId()
+    public MaterialLibraryId? GetSelectedLibraryId() =>
+        SelectedIndex(_libraryEnum, _lastPopulatedLibraries.Count) is { } index ? _lastPopulatedLibraries[index].Id : null;
+
+    // ---- Sheet metal Standard enumeration ----
+
+    /// <summary>Fills the Standard picker and selects the first Standard. Visibility is left to
+    /// <see cref="SetStandardVisible"/>: the .dlx hides the block until a sheet metal library is chosen.</summary>
+    public void PopulateStandardEnum(IReadOnlyList<string> standards)
     {
-        if (_libraryEnum is null || _lastPopulatedLibraries.Count == 0)
+        _lastPopulatedStandards = standards;
+        if (_standardEnum is null)
+            return;
+
+        var properties = _standardEnum.GetProperties();
+        try
+        {
+            properties.SetEnumMembers("Value", standards.ToArray());
+            if (standards.Count > 0)
+                properties.SetEnum("Value", 0);
+        }
+        finally
+        {
+            properties.Dispose();
+        }
+    }
+
+    public string? GetSelectedStandard() =>
+        SelectedIndex(_standardEnum, _lastPopulatedStandards.Count) is { } index ? _lastPopulatedStandards[index] : null;
+
+    public void SetStandardVisible(bool visible)
+    {
+        if (_standardEnum is not null)
+            _standardEnum.Show = visible;
+    }
+
+    /// <summary>The selected index of <paramref name="enumeration"/>, or null when nothing valid is selected among the
+    /// <paramref name="populatedCount"/> members last populated.</summary>
+    private static int? SelectedIndex(Enumeration? enumeration, int populatedCount)
+    {
+        if (enumeration is null || populatedCount == 0)
             return null;
 
-        var properties = _libraryEnum.GetProperties();
+        var properties = enumeration.GetProperties();
         try
         {
             var index = properties.GetEnum("Value");
-            return index >= 0 && index < _lastPopulatedLibraries.Count
-                ? _lastPopulatedLibraries[index].Id
-                : null;
+            return index >= 0 && index < populatedCount ? index : null;
         }
         finally
         {
@@ -701,7 +740,7 @@ public sealed class BlockAccessor
     }
 
     // ---- Generic dialogs ----
-    // Forwards to the shared BANxOpen.Foundation.NxAdapters.NxMessageBoxHelper — these three have no dependency
+    // Forwards to the shared BANxOpen.Foundation.NxAdapters.NxMessageBoxHelper — these four have no dependency
     // on this dialog's blocks or domain types, so the implementation lives once in the foundation instead of
     // being duplicated per project.
 
@@ -711,4 +750,6 @@ public sealed class BlockAccessor
         NxMessageBoxHelper.ShowResult(result, successMessage);
 
     public void ShowError(string message) => NxMessageBoxHelper.ShowError(message);
+
+    public void ShowInfo(string title, string message) => NxMessageBoxHelper.ShowInfo(title, message);
 }
