@@ -7,7 +7,18 @@
       "Bash(dotnet --version)",
       "Bash(dotnet new *)",
       "Bash(dotnet sln *)",
-      "Bash(powershell -NoProfile -Command \"Get-ChildItem 'c:\\\\Users\\\\CYRNBB\\\\source\\\\repos\\\\NXOPEN Projects\\\\NxAdapters' -Recurse -Filter *.cs | Sort-Object LastWriteTime -Descending | Select-Object -First 8 FullName, LastWriteTime | Format-Table -AutoSize\")"
+      "Bash(powershell -NoProfile -Command \"Get-ChildItem 'c:\\\\Users\\\\CYRNBB\\\\source\\\\repos\\\\NXOPEN Projects\\\\NxAdapters' -Recurse -Filter *.cs | Sort-Object LastWriteTime -Descending | Select-Object -First 8 FullName, LastWriteTime | Format-Table -AutoSize\")",
+      "Bash(cd \"c:/Users/CYRNBB/source/repos/BANxOpen.Foundation\" && cat Directory.Build.props 2>/dev/null; echo \"=== core.materials csproj ===\"; cat src/BANxOpen.Foundation.Core.Materials/BANxOpen.Foundation.Core.Materials.csproj)",
+      "PowerShell(dotnet build \"c:\\\\Users\\\\CYRNBB\\\\source\\\\repos\\\\BANxOpen.Foundation\\\\src\\\\BANxOpen.Foundation.Core.Materials\\\\BANxOpen.Foundation.Core.Materials.csproj\" -v q --nologo 2>&1)",
+      "PowerShell(dotnet build \"C:\\\\Users\\\\CYRNBB\\\\source\\\\repos\\\\BANxOpen.Foundation\\\\BANxOpen.Foundation.sln\" -v q --nologo 2>&1)",
+      "PowerShell(dotnet test \"C:\\\\Users\\\\CYRNBB\\\\source\\\\repos\\\\BANxOpen.Foundation\\\\BANxOpen.Foundation.sln\" --nologo -v q 2>&1)",
+      "PowerShell(dotnet build \"C:\\\\Users\\\\CYRNBB\\\\source\\\\repos\\\\BANxOpen.SheetMetal\\\\BANxOpen.SheetMetal.sln\" -v q --nologo 2>&1)",
+      "Bash(cd \"c:/Users/CYRNBB/source/repos/BANxOpen.SheetMetal\" && grep -n \"ProjectReference\\\\|Reference Include\" src/BANxOpen.SheetMetal.Core/BANxOpen.SheetMetal.Core.csproj | head -20)",
+      "Read(//c/Users/CYRNBB/source/repos/BANxOpen.SheetMetal/**)",
+      "PowerShell(dotnet test \"C:\\\\Users\\\\CYRNBB\\\\source\\\\repos\\\\BANxOpen.SheetMetal\\\\BANxOpen.SheetMetal.sln\" --nologo -v q 2>&1)",
+      "Bash(cd \"c:/Users/CYRNBB/source/repos/BANxOpen.Ui.SheetMetal.Bead\" && grep -n \"\\\\.Assign\\(\\\\|FindMaterial\\\\|_materialAssignment\\\\|SheetMetalMaterialAssignment\" src/BANxOpen.Ui.SheetMetal.Bead/BeadDialogPresenter.cs)",
+      "Read(//c/Users/CYRNBB/source/repos/BANxOpen.Ui.SheetMetal.Bead/**)",
+      "Bash(cd \"c:/Users/CYRNBB/source/repos/BANxOpen.Ui.SheetMetal.Bead\" && grep -n \"^using\\\\|namespace\" src/BANxOpen.Ui.SheetMetal.Bead/SheetMetalMaterialAssignment.cs | head -15)"
     ]
   }
 }

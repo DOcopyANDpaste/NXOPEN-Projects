@@ -1,4 +1,5 @@
 using BANxOpen.Foundation.Core.Materials.Assignment;
+using BANxOpen.Foundation.Core.Materials.Assignment.Choices;
 using BANxOpen.Foundation.Core.Materials.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Contracts.Materials;
@@ -18,6 +19,10 @@ public enum PendingBodyStatus
 
 public sealed record PendingBodyRow(BodyInfo Body, PendingBodyStatus Status, string? Message);
 
+/// <summary>One question the rules raised for an entry, with the option the user (or the domain, for an automatic
+/// choice) settled on and anything worth reporting about that pick once it is applied.</summary>
+public sealed record ResolvedAssignmentChoice(PendingAssignmentChoice Question, string OptionId, IReadOnlyList<string> Warnings);
+
 /// <summary>One staged "assign this material to these bodies" request, held between the user picking it off
 /// the material tree and OK/Apply committing it. Presentation-only, like <see cref="MaterialUsageRow"/> —
 /// it carries the Core types the commit needs (<see cref="Input"/> and <see cref="Plan"/> go straight to
@@ -33,6 +38,12 @@ public sealed record PendingAssignmentEntry(
     AssignmentPlan Plan,
     IReadOnlyList<PendingBodyRow> Rows)
 {
+    /// <summary>The questions the rules raised, answered when the entry was created — at staging time, not at
+    /// commit — so a batch of entries cannot each answer against a part the earlier ones are about to change.
+    /// Carried across re-plans: answers are keyed by body when they are built, so an entry that lost bodies
+    /// simply has answers nobody reads.</summary>
+    public IReadOnlyList<ResolvedAssignmentChoice> ResolvedChoices { get; init; } = Array.Empty<ResolvedAssignmentChoice>();
+
     public static PendingAssignmentEntry Create(MaterialAssignmentPlanningInput input, AssignmentPlan plan)
     {
         var evaluationsByBody = plan.BodyEvaluations.ToDictionary(e => e.BodyId);

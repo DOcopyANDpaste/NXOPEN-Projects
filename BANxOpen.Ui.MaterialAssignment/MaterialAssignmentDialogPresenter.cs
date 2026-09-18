@@ -1,10 +1,14 @@
 using BANxOpen.Foundation.Core.Materials.Assignment;
+using BANxOpen.Foundation.Core.Materials.Assignment.Choices;
 using BANxOpen.Foundation.Core.Materials.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Core.Materials.Library;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Bodies;
+using BANxOpen.Foundation.Core.Materials.Rules.SheetMetal;
+using BANxOpen.SheetMetal.Materials;
+using BANxOpen.Ui.MaterialAssignment.AssignmentChoiceUi;
 
 namespace BANxOpen.Ui.MaterialAssignment;
 
@@ -15,7 +19,8 @@ namespace BANxOpen.Ui.MaterialAssignment;
 /// Library selection, tree population and staging only read via Core and re-render via
 /// <see cref="BlockAccessor"/> — zero NX mutation. Mutation is confined to <see cref="CommitEntry"/> (assign)
 /// and <see cref="RemoveMaterialFrom"/> (clear), each of which opens its own undo mark inside
-/// <see cref="IPartMaterialService"/>, never here.
+/// <see cref="IPartMaterialService"/>. The one exception is <see cref="_sessionUndo"/>: a mark set when the
+/// dialog opens so that Cancel can offer to revert everything applied while it was open.
 ///
 /// Two ways to assign, both driven from the material tree's right-click menu. "Assign now" plans, confirms
 /// and applies immediately — one self-contained transaction. "Add to pending" stages the planned entry in
@@ -56,6 +61,10 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     private readonly IMaterialCategoryTreeBuilder _categoryTreeBuilder;
     private readonly IMaterialAssignmentPlanner _planner;
     private readonly IAssignmentPlanFinalizer _finalizer;
+    private readonly IAssignmentChoiceCollector _choiceCollector;
+    private readonly IAssignmentChoiceWindow _choiceWindow;
+    private readonly SheetMetalStandardSelection _standardSelection;
+    private readonly SheetMetalLibraries _sheetMetalLibraries;
     private readonly IMaterialPropertyWindow? _propertyWindow;
 
     private IReadOnlyList<MaterialLibraryReference> _libraries = Array.Empty<MaterialLibraryReference>();
@@ -66,6 +75,10 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         new Dictionary<BodyId, BodyMaterialAssignment>();
     private readonly List<PendingAssignmentEntry> _pending = new();
 
+    // What was changed in the part while the dialog was open, for Cancel to list, and the mark it reverts to.
+    private readonly List<string> _appliedThisSession = new();
+    private UndoScope? _sessionUndo;
+
     public MaterialAssignmentDialogPresenter(
         NxSessionContext context,
         BlockAccessor blocks,
@@ -75,8 +88,14 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         IMaterialCategoryTreeBuilder categoryTreeBuilder,
         IMaterialAssignmentPlanner planner,
         IAssignmentPlanFinalizer finalizer,
+        IAssignmentChoiceCollector choiceCollector,
+        IAssignmentChoiceWindow choiceWindow,
+        SheetMetalStandardSelection standardSelection,
+        SheetMetalLibraries sheetMetalLibraries,
         IMaterialPropertyWindow? propertyWindow = null)
     {
+        _standardSelection = standardSelection;
+        _sheetMetalLibraries = sheetMetalLibraries;
         _context = context;
         _blocks = blocks;
         _partMaterialService = partMaterialService;
@@ -85,6 +104,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         _categoryTreeBuilder = categoryTreeBuilder;
         _planner = planner;
         _finalizer = finalizer;
+        _choiceCollector = choiceCollector;
+        _choiceWindow = choiceWindow;
         _propertyWindow = propertyWindow;
     }
 
@@ -94,11 +115,23 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     public void OnDialogShown()
     {
+        // ??= because this may re-fire on a tab switch (see OnUpdate), and a second mark would make Cancel's
+        // revert stop short of whatever was applied before the switch.
+        _sessionUndo ??= new UndoScope(_context.Session, "Material Assignment dialog", _context.Log.Error);
+
         _blocks.ClearHighlight();
         _blocks.SetUpColumns();
 
         _libraries = _libraryRepository.ListAvailableLibraries();
         _blocks.PopulateLibraryEnum(_libraries);
+
+        // Once only, for the same re-fire reason as the undo mark: a tab switch must not reset a Standard the user
+        // chose. The first Standard is the default.
+        if (_standardSelection.Selected is null)
+        {
+            _blocks.PopulateStandardEnum(_standardSelection.Standards);
+            _standardSelection.Selected = _blocks.GetSelectedStandard();
+        }
 
         RefreshBodyState();
         RefreshAssignmentTree();
@@ -115,6 +148,11 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         {
             case BlockAccessor.LibraryEnumId:
                 OnLibrarySelectionChanged();
+                break;
+            case BlockAccessor.StandardEnumId:
+                // Only decides which rows the Sheet Metal Preferences are offered; the material tree is unaffected.
+                // Staged entries keep the row they were answered with.
+                _standardSelection.Selected = _blocks.GetSelectedStandard();
                 break;
             case BlockAccessor.SelectAllButtonId:
                 OnSelectAllSolidsClicked();
@@ -154,12 +192,14 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             CommitPending();
 
         _blocks.ClearHighlight();
+        CloseKeepingChanges();
         return 0;
     }
 
     private void CommitPending()
     {
-        // Snapshot: committing refreshes state, which rebuilds _pending.
+        // Snapshot: committing refreshes state, which rebuilds _pending. Every choice was answered at staging
+        // time, so nothing here can be backed out of and every entry is dealt with.
         foreach (var entry in _pending.ToList())
             CommitEntry(entry);
 
@@ -167,13 +207,62 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         OnRefreshClicked();
     }
 
-    public void OnCancel()
+    /// <summary>Cancel (and the title bar's close, which NX routes to the same callback). Staged entries were
+    /// never applied, so they only need a warning that they are about to be lost. Anything applied while the
+    /// dialog was open — "Assign now", Apply, "Apply all", "Remove material" — is listed, and the user chooses
+    /// whether to revert to the state the part was in when the dialog opened or keep it.</summary>
+    /// <returns>1 to keep the dialog open, 0 to let it close.</returns>
+    public int OnCancel()
     {
-        // No mutation to undo — staged entries were never applied, and the direct "assign now" path commits
-        // its own transaction at the time it runs. The dialog framework closes itself.
-        //
-        // Note the Styler registered no cancel handler for this dialog, so nothing currently calls this. Do
-        // not put cleanup here expecting it to run.
+        var discardNote = _pending.Count > 0
+            ? $"{_pending.Count} staged assignment(s) were never applied and will be discarded."
+            : null;
+
+        if (_appliedThisSession.Count == 0)
+        {
+            if (discardNote is not null && !_blocks.Confirm($"{discardNote}{Environment.NewLine}{Environment.NewLine}Close anyway?"))
+                return 1;
+
+            CloseKeepingChanges();
+            return 0;
+        }
+
+        var message =
+            $"These changes were applied while this dialog was open:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, _appliedThisSession.Select(c => $"  {c}")) +
+            (discardNote is null ? string.Empty : $"{Environment.NewLine}{Environment.NewLine}{discardNote}") +
+            $"{Environment.NewLine}{Environment.NewLine}Revert them?{Environment.NewLine}" +
+            $"  Yes - revert to the state the part was in before this dialog opened.{Environment.NewLine}" +
+            "  No - keep the changes.";
+
+        if (_blocks.Confirm(message))
+        {
+            // Disposing without committing is what undoes to the mark.
+            _sessionUndo?.Dispose();
+            _sessionUndo = null;
+        }
+        else
+        {
+            CloseKeepingChanges();
+        }
+
+        _blocks.ClearHighlight();
+        return 0;
+    }
+
+    /// <summary>Notes a change for Cancel to list. A partial failure still changed the part; an aborted
+    /// operation rolled itself back and did not.</summary>
+    private void RecordApplied(OperationResult result, string description)
+    {
+        if (result.Ok || result.ErrorCode == "PARTIAL_FAILURE")
+            _appliedThisSession.Add(description);
+    }
+
+    private void CloseKeepingChanges()
+    {
+        _sessionUndo?.Commit();
+        _sessionUndo?.Dispose();
+        _sessionUndo = null;
     }
 
     /// <summary>Re-queries the physical/display material state from the part and re-renders everything derived
@@ -229,6 +318,9 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
         _currentLibrary = _libraryLoader.GetOrLoad(reference);
         _partMaterialService.SetResolutionLibraries(new[] { _currentLibrary });
+
+        // The Standard only matters for materials that can go on sheet metal bodies.
+        _blocks.SetStandardVisible(_sheetMetalLibraries.IsSheetMetalLibrary(reference.Id));
 
         _blocks.PopulateMaterialTree(_categoryTreeBuilder.Build(_currentLibrary));
 
@@ -317,7 +409,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     private void AssignNow(Material material)
     {
-        var entry = BuildEntry(material);
+        var entry = BuildResolvedEntry(material);
         if (entry is null)
             return;
 
@@ -327,7 +419,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     private void AddToPending(Material material)
     {
-        var entry = BuildEntry(material);
+        var entry = BuildResolvedEntry(material);
         if (entry is null)
             return;
 
@@ -356,7 +448,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 continue;
             }
 
-            _pending[i] = Replan(entry.Material, keptRows.Select(r => r.Body).ToList());
+            _pending[i] = Replan(entry.Material, keptRows.Select(r => r.Body).ToList())
+                with { ResolvedChoices = entry.ResolvedChoices };
         }
     }
 
@@ -431,6 +524,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
         var result = _partMaterialService.ClearMaterial(bodyIds);
         _blocks.ShowResult(result, $"Material cleared from {bodyIds.Count} body(ies).");
+
+        RecordApplied(result, $"Material cleared from {bodyIds.Count} body(ies)");
         OnRefreshClicked();
     }
 
@@ -536,6 +631,87 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         return Replan(material, targets);
     }
 
+    /// <summary>Plans the selection, refuses a second sheet metal material, then puts the rules' questions to the
+    /// user — all before anything is applied or staged, so a staged entry already carries its answers. Returns
+    /// null when the entry cannot be built, conflicts, or the user cancelled a question.</summary>
+    private PendingAssignmentEntry? BuildResolvedEntry(Material material)
+    {
+        var entry = BuildEntry(material);
+        if (entry is null)
+            return null;
+
+        if (FindSheetMetalConflict(material, entry.Rows.Select(r => r.Body).ToList()) is { } conflict)
+        {
+            _blocks.ShowError(conflict);
+            return null;
+        }
+
+        // A material with no row at all is blocked by the engine's own constraint; one with rows only under other
+        // Standards is not, so it is refused here, before anything is staged or applied.
+        if (entry.Rows.Any(r => r.Body.Kind == BodyKind.SheetMetal)
+            && _standardSelection.Selected is { } standard
+            && _standardSelection.RowsFor(material.Name).Count == 0)
+        {
+            _blocks.ShowError(
+                $"'{material.Name}' has no row under Standard '{standard}' in the sheet metal material standards " +
+                "file, so Sheet Metal Preferences cannot be set to it. Choose another Standard.");
+            return null;
+        }
+
+        if (!TryResolveChoices(entry, out var resolved))
+            return null;
+
+        return entry with { ResolvedChoices = resolved };
+    }
+
+    /// <summary>NX keeps one set of Sheet Metal Preferences per part, so every sheet metal body in it has to share
+    /// a material — assigning a second one would re-point the preferences out from under the first. Returns why
+    /// <paramref name="material"/> cannot go onto <paramref name="targets"/>, or null when it can.
+    ///
+    /// Only the sheet metal bodies outside <paramref name="targets"/> count: the targets are about to take
+    /// <paramref name="material"/>, so re-assigning every sheet metal body at once is not a conflict. A body
+    /// claimed by a staged entry counts as that entry's material, since that is what it will have. Regular solids
+    /// have no shared state, so a selection with no sheet metal body never conflicts.</summary>
+    private string? FindSheetMetalConflict(Material material, IReadOnlyList<BodyInfo> targets)
+    {
+        if (!targets.Any(b => b.Kind == BodyKind.SheetMetal))
+            return null;
+
+        var targetIds = targets.Select(b => b.Id).ToHashSet();
+
+        var stagedMaterial = new Dictionary<BodyId, string>();
+        foreach (var entry in _pending)
+        {
+            foreach (var row in entry.Rows)
+                stagedMaterial[row.Body.Id] = entry.Material.Name;
+        }
+
+        var conflicting = _allBodies
+            .Where(b => b.Kind == BodyKind.SheetMetal && !targetIds.Contains(b.Id))
+            .Select(b =>
+            {
+                var name = stagedMaterial.TryGetValue(b.Id, out var staged)
+                    ? staged
+                    : _currentAssignments.TryGetValue(b.Id, out var current) ? current.MaterialName : null;
+                return (Body: b, Material: name, IsStaged: staged is not null);
+            })
+            .Where(x => x.Material is not null
+                        && !string.Equals(x.Material, material.Name, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (conflicting.Count == 0)
+            return null;
+
+        var details = conflicting.Select(x => $"  [{x.Body.Name}] {x.Material}{(x.IsStaged ? " (pending)" : string.Empty)}");
+        return
+            $"{material.Name} cannot be assigned to sheet metal bodies in this part.{Environment.NewLine}{Environment.NewLine}" +
+            $"Sheet Metal Preferences belong to the part, so every sheet metal body in it must have the same " +
+            $"material, and these already have a different one:{Environment.NewLine}" +
+            string.Join(Environment.NewLine, details) +
+            $"{Environment.NewLine}{Environment.NewLine}Nothing was assigned or staged. Assign {material.Name} to all of the " +
+            "sheet metal bodies together, or leave the sheet metal bodies out of the selection.";
+    }
+
     private PendingAssignmentEntry Replan(Material material, IReadOnlyList<BodyInfo> targets)
     {
         var input = new MaterialAssignmentPlanningInput(material, targets, _currentAssignments);
@@ -556,13 +732,15 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 .ToList();
 
             if (stillPresent.Count > 0)
-                _pending[i] = Replan(entry.Material, stillPresent);
+                _pending[i] = Replan(entry.Material, stillPresent) with { ResolvedChoices = entry.ResolvedChoices };
         }
 
         _pending.RemoveAll(e => e.Rows.Count == 0);
         _blocks.PopulatePendingTree(_pending);
     }
 
+    /// <summary>Applies one entry. Its choices were answered when it was built (<see cref="BuildResolvedEntry"/>),
+    /// so the only thing still asked here is confirmation for the bodies that need it.</summary>
     private void CommitEntry(PendingAssignmentEntry entry)
     {
         if (!entry.HasAnyApplicableBody)
@@ -571,9 +749,23 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return;
         }
 
+        // Checked again because the dialog is interactive: the part may have gained a sheet metal material since
+        // the entry was staged.
+        if (FindSheetMetalConflict(entry.Material, entry.Rows.Select(r => r.Body).ToList()) is { } conflict)
+        {
+            _blocks.ShowError(conflict);
+            return;
+        }
+
         var confirmedBodyIds = GetConfirmedBodyIds(entry);
-        var executablePlan = _finalizer.Finalize(entry.Plan, entry.Input, confirmedBodyIds);
+
+        var answers = AssignmentChoiceAnswers.CreateBuilder();
+        foreach (var choice in entry.ResolvedChoices)
+            answers.Answer(choice.Question, choice.OptionId);
+
+        var executablePlan = _finalizer.Finalize(entry.Plan, entry.Input, confirmedBodyIds, answers.Build());
         var result = _partMaterialService.ApplyPlan(executablePlan);
+        RecordApplied(result, $"{entry.Material.Name} assigned to {executablePlan.Assignments.Count} body(ies)");
 
         // Warnings never stop an assignment, but "Assign now" skips the pending tree where they would otherwise
         // be seen — for example a bead on the body that matches no SPEC, whose restriction is therefore not
@@ -582,6 +774,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             .Where(r => r.Status == PendingBodyStatus.Ok && !string.IsNullOrWhiteSpace(r.Message))
             .Select(r => $"[{r.Body.Name}] {r.Message}")
             .ToList();
+
+        warnings.AddRange(entry.ResolvedChoices.SelectMany(c => c.Warnings));
 
         var summary = $"{entry.Material.Name} applied to {executablePlan.Assignments.Count} body(ies).";
         if (warnings.Count > 0)
@@ -595,7 +789,81 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 $"Skipped {executablePlan.SkippedBlocked.Count} blocked, " +
                 $"{executablePlan.SkippedDeclinedConfirmation.Count} declined body(ies).");
         }
+
+        // Choices are answered at staging for every body not blocked then, so this only happens when a re-plan
+        // unblocked a body that was never asked about, or the collector and the finalizer disagree about which
+        // bodies are going ahead. Logged rather than shown: re-staging the material is the user's only remedy
+        // and the result message already gives the applied count.
+        if (executablePlan.SkippedUnresolvedChoice.Count > 0)
+        {
+            _context.Log.Error(
+                $"Skipped {executablePlan.SkippedUnresolvedChoice.Count} body(ies) with an unanswered choice: " +
+                string.Join(", ", executablePlan.SkippedUnresolvedChoice.Select(b => b.Value)));
+        }
     }
+
+    /// <summary>Puts every question the rules raised for this entry to the user.
+    ///
+    /// A choice the domain already settled is shown as an information window rather than asked — the user still
+    /// learns what was decided for them, which for the Sheet Metal Preferences is the difference between the
+    /// part quietly changing and the user knowing it did.
+    ///
+    /// A question an already-staged entry of the same material answered is not asked again. For sheet metal this
+    /// is the one-material-per-part case: the preferences have one row, and a second batch of bodies taking the
+    /// same material takes the same row.
+    ///
+    /// Asked for every body not blocked, including those still needing confirmation — confirmation is only
+    /// collected at commit, and a body the user then declines just leaves its answer unread.
+    ///
+    /// Cancelling any question abandons the whole entry: the choices feed side effects that are part of what
+    /// makes the assignment correct, so applying the material without them would leave exactly the half-done
+    /// state the rules exist to prevent.</summary>
+    /// <returns>False when the user cancelled, in which case nothing should be applied or staged.</returns>
+    private bool TryResolveChoices(PendingAssignmentEntry entry, out IReadOnlyList<ResolvedAssignmentChoice> resolved)
+    {
+        var answered = new List<ResolvedAssignmentChoice>();
+        resolved = answered;
+
+        var questions = _choiceCollector.Collect(entry.Plan, entry.Input, entry.BodyIdsNeedingConfirmation.ToHashSet());
+
+        foreach (var question in questions)
+        {
+            if (FindStagedAnswer(entry.Material, question) is { } staged)
+            {
+                answered.Add(new ResolvedAssignmentChoice(question, staged.OptionId, Array.Empty<string>()));
+                continue;
+            }
+
+            if (question.Choice.Auto is { } auto)
+            {
+                _blocks.ShowInfo(question.Choice.Title, auto.Message);
+                answered.Add(new ResolvedAssignmentChoice(question, auto.OptionId, Array.Empty<string>()));
+                continue;
+            }
+
+            var result = _choiceWindow.Resolve(question.Choice);
+            if (result.WasCancelled || result.OptionId is not { } optionId)
+            {
+                _context.Log.Info(
+                    $"'{question.Choice.Title}' was cancelled; {entry.Material.Name} was not assigned to " +
+                    $"{question.BodyIds.Count} body(ies).");
+                return false;
+            }
+
+            answered.Add(new ResolvedAssignmentChoice(question, optionId, result.Warnings));
+        }
+
+        return true;
+    }
+
+    private ResolvedAssignmentChoice? FindStagedAnswer(Material material, PendingAssignmentChoice question) =>
+        _pending
+            .Where(e => string.Equals(e.Material.Name, material.Name, StringComparison.OrdinalIgnoreCase))
+            .SelectMany(e => e.ResolvedChoices)
+            .FirstOrDefault(c =>
+                string.Equals(c.Question.Choice.ChoiceId, question.Choice.ChoiceId, StringComparison.Ordinal)
+                && string.Equals(c.Question.Choice.GroupKey, question.Choice.GroupKey, StringComparison.Ordinal)
+                && question.Choice.Find(c.OptionId) is not null);
 
     /// <summary>Asks the user to confirm the bodies whose rules returned RequireConfirmation — chiefly
     /// reassignment over an existing material, and coating display-material mismatches.
