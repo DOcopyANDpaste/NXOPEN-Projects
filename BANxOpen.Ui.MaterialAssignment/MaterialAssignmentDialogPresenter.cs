@@ -1,5 +1,4 @@
 using BANxOpen.Foundation.Core.Materials.Assignment;
-using BANxOpen.Foundation.Core.Materials.Assignment.Choices;
 using BANxOpen.Foundation.Core.Materials.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Core.Materials.Library;
@@ -9,7 +8,6 @@ using BANxOpen.Foundation.Contracts.Bodies;
 using BANxOpen.Foundation.Core.Materials.Rules.SheetMetal;
 using BANxOpen.SheetMetal.Materials;
 using BANxOpen.SheetMetal.NxAdapters.Common;
-using BANxOpen.Ui.MaterialAssignment.AssignmentChoiceUi;
 
 namespace BANxOpen.Ui.MaterialAssignment;
 
@@ -63,8 +61,6 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     private readonly IMaterialCategoryTreeBuilder _categoryTreeBuilder;
     private readonly IMaterialAssignmentPlanner _planner;
     private readonly IAssignmentPlanFinalizer _finalizer;
-    private readonly IAssignmentChoiceCollector _choiceCollector;
-    private readonly IAssignmentChoiceWindow _choiceWindow;
     private readonly SheetMetalStandardSelection _standardSelection;
     private readonly SheetMetalLibraries _sheetMetalLibraries;
     private readonly SheetMetalMaterialTable _sheetMetalTable;
@@ -100,8 +96,6 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         IMaterialCategoryTreeBuilder categoryTreeBuilder,
         IMaterialAssignmentPlanner planner,
         IAssignmentPlanFinalizer finalizer,
-        IAssignmentChoiceCollector choiceCollector,
-        IAssignmentChoiceWindow choiceWindow,
         SheetMetalStandardSelection standardSelection,
         SheetMetalLibraries sheetMetalLibraries,
         SheetMetalMaterialTable sheetMetalTable,
@@ -120,8 +114,6 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         _categoryTreeBuilder = categoryTreeBuilder;
         _planner = planner;
         _finalizer = finalizer;
-        _choiceCollector = choiceCollector;
-        _choiceWindow = choiceWindow;
         _propertyWindow = propertyWindow;
     }
 
@@ -598,10 +590,10 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         }
     }
 
-    /// <returns>False when nothing was applied: the entry could not be built, or the user backed out of a question.</returns>
+    /// <returns>False when nothing was applied: the entry could not be built or conflicted.</returns>
     private bool AssignNow(MaterialPick pick)
     {
-        var entry = BuildResolvedEntry(pick);
+        var entry = BuildCheckedEntry(pick);
         if (entry is null)
             return false;
 
@@ -612,7 +604,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     private void AddToPending(MaterialPick pick)
     {
-        var entry = BuildResolvedEntry(pick);
+        var entry = BuildCheckedEntry(pick);
         if (entry is null)
             return;
 
@@ -820,13 +812,13 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return null;
         }
 
-        return Replan(pick.Material, targets) with { SheetMetalRow = pick.Row };
+        return Replan(pick.Material, pick.Row, targets);
     }
 
-    /// <summary>Plans the selection, refuses a second sheet metal material, then puts the rules' questions to the
-    /// user — all before anything is applied or staged, so a staged entry already carries its answers. Returns
-    /// null when the entry cannot be built, conflicts, or the user cancelled a question.</summary>
-    private PendingAssignmentEntry? BuildResolvedEntry(MaterialPick pick)
+    /// <summary>Plans the selection and refuses a sheet metal body with no row picked or a second sheet metal
+    /// material, before anything is applied or staged. Returns null when the entry cannot be built or
+    /// conflicts.</summary>
+    private PendingAssignmentEntry? BuildCheckedEntry(MaterialPick pick)
     {
         var entry = BuildEntry(pick);
         if (entry is null)
@@ -851,10 +843,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return null;
         }
 
-        if (!TryResolveChoices(entry, out var resolved))
-            return null;
-
-        return entry with { ResolvedChoices = resolved };
+        return entry;
     }
 
     /// <summary>NX keeps one set of Sheet Metal Preferences per part, so every sheet metal body in it has to share
@@ -937,16 +926,18 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     private static bool SameName(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
-    private PendingAssignmentEntry Replan(Material material, IReadOnlyList<BodyInfo> targets)
+    /// <param name="row">The sheet metal row picked with the material, which the rules check and the Sheet Metal
+    /// Preferences are set to. Null when the material was picked on its own.</param>
+    private PendingAssignmentEntry Replan(Material material, SheetMetalMaterialRow? row, IReadOnlyList<BodyInfo> targets)
     {
-        var input = new MaterialAssignmentPlanningInput(material, targets, _currentAssignments);
-        return PendingAssignmentEntry.Create(input, _planner.Plan(input));
+        var input = new MaterialAssignmentPlanningInput(material, targets, _currentAssignments) { RequestedVariant = row?.Name };
+        return PendingAssignmentEntry.Create(input, _planner.Plan(input)) with { SheetMetalRow = row };
     }
 
-    /// <summary>Re-plans a staged entry onto <paramref name="targets"/>, keeping what the user decided when staging it:
-    /// the answers to the rules' questions and the picked sheet metal row.</summary>
+    /// <summary>Re-plans a staged entry onto <paramref name="targets"/>, keeping the sheet metal row picked when it was
+    /// staged.</summary>
     private PendingAssignmentEntry Replan(PendingAssignmentEntry entry, IReadOnlyList<BodyInfo> targets) =>
-        Replan(entry.Material, targets) with { ResolvedChoices = entry.ResolvedChoices, SheetMetalRow = entry.SheetMetalRow };
+        Replan(entry.Material, entry.SheetMetalRow, targets);
 
     /// <summary>Re-plans every staged entry against freshly-read part state. Without this a staged entry keeps
     /// the outcomes it was created with, so a body that gained a material since staging would still show as an
@@ -969,13 +960,16 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         _blocks.PopulatePendingTree(_pending);
     }
 
-    /// <summary>Applies one entry. Its choices were answered when it was built (<see cref="BuildResolvedEntry"/>),
-    /// so the only thing still asked here is confirmation for the bodies that need it.</summary>
+    /// <summary>Applies one entry, first asking for confirmation for the bodies whose rules need it.</summary>
     private void CommitEntry(PendingAssignmentEntry entry)
     {
         if (!entry.HasAnyApplicableBody)
         {
-            _blocks.ShowError($"Every body staged for {entry.DisplayName} is blocked by a rule; nothing was applied.");
+            // The reasons matter most on "Assign now", which never shows the pending tree they would be listed in.
+            var reasons = entry.Rows.Select(r => r.Message).Where(m => !string.IsNullOrWhiteSpace(m)).Distinct();
+            _blocks.ShowError(
+                $"Every body staged for {entry.DisplayName} is blocked by a rule; nothing was applied." +
+                $"{Environment.NewLine}{Environment.NewLine}{string.Join(Environment.NewLine, reasons)}");
             return;
         }
 
@@ -989,11 +983,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
         var confirmedBodyIds = GetConfirmedBodyIds(entry);
 
-        var answers = AssignmentChoiceAnswers.CreateBuilder();
-        foreach (var choice in entry.ResolvedChoices)
-            answers.Answer(choice.Question, choice.OptionId);
-
-        var executablePlan = _finalizer.Finalize(entry.Plan, entry.Input, confirmedBodyIds, answers.Build());
+        var executablePlan = _finalizer.Finalize(entry.Plan, entry.Input, confirmedBodyIds);
         var result = _partMaterialService.ApplyPlan(executablePlan);
         RecordApplied(result, $"{entry.DisplayName} assigned to {executablePlan.Assignments.Count} body(ies)");
 
@@ -1004,8 +994,6 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             .Where(r => r.Status == PendingBodyStatus.Ok && !string.IsNullOrWhiteSpace(r.Message))
             .Select(r => $"[{r.Body.Name}] {r.Message}")
             .ToList();
-
-        warnings.AddRange(entry.ResolvedChoices.SelectMany(c => c.Warnings));
 
         var summary = $"{entry.DisplayName} applied to {executablePlan.Assignments.Count} body(ies).";
         if (warnings.Count > 0)
@@ -1019,133 +1007,11 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 $"Skipped {executablePlan.SkippedBlocked.Count} blocked, " +
                 $"{executablePlan.SkippedDeclinedConfirmation.Count} declined body(ies).");
         }
-
-        // Choices are answered at staging for every body not blocked then, so this only happens when a re-plan
-        // unblocked a body that was never asked about, or the collector and the finalizer disagree about which
-        // bodies are going ahead. Logged rather than shown: re-staging the material is the user's only remedy
-        // and the result message already gives the applied count.
-        if (executablePlan.SkippedUnresolvedChoice.Count > 0)
-        {
-            _context.Log.Error(
-                $"Skipped {executablePlan.SkippedUnresolvedChoice.Count} body(ies) with an unanswered choice: " +
-                string.Join(", ", executablePlan.SkippedUnresolvedChoice.Select(b => b.Value)));
-        }
     }
-
-    /// <summary>Puts every question the rules raised for this entry to the user.
-    ///
-    /// A choice the domain already settled is shown as an information window rather than asked — the user still
-    /// learns what was decided for them, which for the Sheet Metal Preferences is the difference between the
-    /// part quietly changing and the user knowing it did.
-    ///
-    /// A question an already-staged entry of the same material answered is not asked again. For sheet metal this
-    /// is the one-material-per-part case: the preferences have one row, and a second batch of bodies taking the
-    /// same material takes the same row.
-    ///
-    /// Asked for every body not blocked, including those still needing confirmation — confirmation is only
-    /// collected at commit, and a body the user then declines just leaves its answer unread.
-    ///
-    /// Cancelling any question abandons the whole entry: the choices feed side effects that are part of what
-    /// makes the assignment correct, so applying the material without them would leave exactly the half-done
-    /// state the rules exist to prevent.</summary>
-    /// <returns>False when the user cancelled, in which case nothing should be applied or staged.</returns>
-    private bool TryResolveChoices(PendingAssignmentEntry entry, out IReadOnlyList<ResolvedAssignmentChoice> resolved)
-    {
-        var answered = new List<ResolvedAssignmentChoice>();
-        resolved = answered;
-
-        var questions = _choiceCollector.Collect(entry.Plan, entry.Input, entry.BodyIdsNeedingConfirmation.ToHashSet());
-
-        foreach (var question in questions)
-        {
-            // The row picked in the tree answers the Sheet Metal Preferences question outright: no window, and no
-            // automatic or previously staged answer overrides what the user chose.
-            if (entry.SheetMetalRow is { } row
-                && string.Equals(question.Choice.ChoiceId, SheetMetalRowChoiceProvider.ChoiceIdentifier, StringComparison.Ordinal))
-            {
-                if (TryAnswerWithPickedRow(entry, question, row) is not { } picked)
-                    return false;
-
-                answered.Add(picked);
-                continue;
-            }
-
-            if (FindStagedAnswer(entry.Material, question) is { } staged)
-            {
-                answered.Add(new ResolvedAssignmentChoice(question, staged.OptionId, Array.Empty<string>()));
-                continue;
-            }
-
-            if (question.Choice.Auto is { } auto)
-            {
-                _blocks.ShowInfo(question.Choice.Title, auto.Message);
-                answered.Add(new ResolvedAssignmentChoice(question, auto.OptionId, Array.Empty<string>()));
-                continue;
-            }
-
-            var result = _choiceWindow.Resolve(question.Choice);
-            if (result.WasCancelled || result.OptionId is not { } optionId)
-            {
-                _context.Log.Info(
-                    $"'{question.Choice.Title}' was cancelled; {entry.Material.Name} was not assigned to " +
-                    $"{question.BodyIds.Count} body(ies).");
-                return false;
-            }
-
-            answered.Add(new ResolvedAssignmentChoice(question, optionId, result.Warnings));
-        }
-
-        return true;
-    }
-
-    /// <summary>Answers the Sheet Metal Preferences question with <paramref name="row"/>. The rule still decides what
-    /// may be picked: a row it does not offer for these bodies is refused, a row it blocks (the part's sheet metal
-    /// requirements refuse it) is refused with the rule's reason, and one it marks as not matching the body's
-    /// thickness is confirmed with the user first, using the rule's own prompt.</summary>
-    /// <returns>Null when the row cannot be used or the user declined it.</returns>
-    private ResolvedAssignmentChoice? TryAnswerWithPickedRow(
-        PendingAssignmentEntry entry, PendingAssignmentChoice question, SheetMetalMaterialRow row)
-    {
-        if (question.Choice.Find(row.Name) is not { } option)
-        {
-            _blocks.ShowError(
-                $"'{row.Name}' is not one of the Sheet Metal Preferences materials that can be set for " +
-                $"{entry.Material.Name} on these bodies. Pick another row.");
-            return null;
-        }
-
-        if (option.BlockReason is { } blocked)
-        {
-            _blocks.ShowError($"'{row.Name}' cannot be used: {blocked}");
-            _context.Log.Info($"'{row.Name}' is blocked ({blocked}); {entry.Material.Name} was not assigned to {question.BodyIds.Count} body(ies).");
-            return null;
-        }
-
-        if (option.ConfirmationPrompt is not { } prompt)
-            return new ResolvedAssignmentChoice(question, row.Name, Array.Empty<string>());
-
-        if (!_blocks.Confirm(prompt))
-        {
-            _context.Log.Info($"'{row.Name}' was declined; {entry.Material.Name} was not assigned to {question.BodyIds.Count} body(ies).");
-            return null;
-        }
-
-        // As the choice window records a confirmed option, so the result message says why the part disagrees.
-        return new ResolvedAssignmentChoice(question, row.Name, new[] { prompt.Replace(Environment.NewLine, " ") });
-    }
-
-    private ResolvedAssignmentChoice? FindStagedAnswer(Material material, PendingAssignmentChoice question) =>
-        _pending
-            .Where(e => string.Equals(e.Material.Name, material.Name, StringComparison.OrdinalIgnoreCase))
-            .SelectMany(e => e.ResolvedChoices)
-            .FirstOrDefault(c =>
-                string.Equals(c.Question.Choice.ChoiceId, question.Choice.ChoiceId, StringComparison.Ordinal)
-                && string.Equals(c.Question.Choice.GroupKey, question.Choice.GroupKey, StringComparison.Ordinal)
-                // An answer staged before a requirement started refusing it is not carried over.
-                && question.Choice.Find(c.OptionId) is { IsBlocked: false });
 
     /// <summary>Asks the user to confirm the bodies whose rules returned RequireConfirmation — chiefly
-    /// reassignment over an existing material, and coating display-material mismatches.
+    /// reassignment over an existing material, coating display-material mismatches, and a sheet metal row at another
+    /// thickness than the body.
     ///
     /// All-or-nothing per entry: the pending tree already shows which bodies need confirmation and why, so the
     /// prompt only has to collect the answer. The finalizer's per-body handling is untouched, so a per-row
