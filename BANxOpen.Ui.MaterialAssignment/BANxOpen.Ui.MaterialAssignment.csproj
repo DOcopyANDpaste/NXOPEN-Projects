@@ -5,7 +5,7 @@
     BANxOpen.Ui.MaterialAssignment.dll, entry point BANxOpen.Ui.MaterialAssignment.MaterialAssignmentCommand.Main.
 
     Everything that knows about BlockStyler or WinForms lives here and nowhere else, so that
-    BANxOpen.Foundation.Core.Materials and BANxOpen.Foundation.NxAdapters stay reusable from a batch
+    BANxOpen.Materials and BANxOpen.Foundation stay reusable from a batch
     session or a different front end.
 
     In NxMaterialAssignment.sln for IntelliSense, with NO Build.0 entry in any configuration.
@@ -22,16 +22,17 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Contracts: Material, MaterialLibrary, MaterialLibraryReference, MaterialPropertyValue, BodyId.
-         Core: RuleEngine.RuleOutcome.
-         Core.Materials: the planner/finalizer/rules, IMaterialCategoryTreeBuilder, MaterialLibraryParser,
-               CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository, IMaterialLibraryLoader.
-         NxAdapters: NxSessionContext, NxListingLog, and Materials\ (PartMaterialService, BodyResolver,
-               DisplayMaterialHelper, NxPhysicalMaterialSource), formerly the BAMaterial.Adapter project. -->
+    <!-- Foundation: BodyId, OperationResult, RuleOutcome, NxSessionContext, NxListingLog, BodyResolver, UndoScope.
+         Materials.Contracts: Material, MaterialLibrary, MaterialLibraryReference, MaterialPropertyValue.
+         Materials.Core: the planner/finalizer/rules, MaterialCategoryTreeBuilder, MaterialLibraryParser,
+               CachingMaterialLibraryLoader, FileSystemMaterialLibraryRepository.
+         Materials.NxAdapters: MaterialEngine, PartMaterialService. -->
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Contracts\BANxOpen.Foundation.Contracts.csproj" />
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core\BANxOpen.Foundation.Core.csproj" />
-    <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.Core.Materials\BANxOpen.Foundation.Core.Materials.csproj" />
     <ProjectReference Include="..\..\BANxOpen.Foundation\src\BANxOpen.Foundation.NxAdapters\BANxOpen.Foundation.NxAdapters.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Materials\src\BANxOpen.Materials.Contracts\BANxOpen.Materials.Contracts.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Materials\src\BANxOpen.Materials.Core\BANxOpen.Materials.Core.csproj" />
+    <ProjectReference Include="..\..\BANxOpen.Materials\src\BANxOpen.Materials.NxAdapters\BANxOpen.Materials.NxAdapters.csproj" />
     <!-- Sheet metal domain: referenced only so MaterialAssignmentCommand can register the bead SPEC constraint
          provider with the material engine. Nothing else in this dialog uses sheet metal types, and no UI project
          is referenced; the domain library is the only edge between this dialog and the bead tool. -->

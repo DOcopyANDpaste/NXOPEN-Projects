@@ -1,10 +1,10 @@
-using BANxOpen.Foundation.Core.Materials.Library;
+using BANxOpen.Materials.Core.Library;
 using NXOpen;
-using BANxOpen.Foundation.NxAdapters.Materials;
+using BANxOpen.Materials.NxAdapters;
 using BANxOpen.Ui.MaterialAssignment;
 using BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 using BANxOpen.Foundation.NxAdapters;
-using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Materials.Contracts;
 using BANxOpen.SheetMetal.NxAdapters.Common;
 
 namespace BANxOpen.Ui.MaterialAssignment;

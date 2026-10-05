@@ -1,11 +1,11 @@
-using BANxOpen.Foundation.Core.Materials.Assignment;
-using BANxOpen.Foundation.Core.Materials.Bodies;
+using BANxOpen.Materials.Core.Assignment;
+using BANxOpen.Materials.Core.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
-using BANxOpen.Foundation.Core.Materials.Library;
-using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Materials.Core.Library;
+using BANxOpen.Materials.Contracts;
 using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Bodies;
-using BANxOpen.Foundation.Core.Materials.Rules.SheetMetal;
+using BANxOpen.Materials.Core.Rules.SheetMetal;
 using BANxOpen.SheetMetal.Materials;
 using BANxOpen.SheetMetal.NxAdapters.Common;
 
@@ -69,7 +69,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     private IReadOnlyList<MaterialLibraryReference> _libraries = Array.Empty<MaterialLibraryReference>();
     private MaterialLibraryReference? _currentLibraryReference;
-    private BANxOpen.Foundation.Contracts.Materials.MaterialLibrary? _currentLibrary;
+    private BANxOpen.Materials.Contracts.MaterialLibrary? _currentLibrary;
     private MaterialPick? _selectedPick;
 
     // Sheet Metal Preferences. Only meaningful while a sheet metal library is selected: the standards file rows made of

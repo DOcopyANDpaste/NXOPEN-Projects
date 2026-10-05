@@ -1,4 +1,4 @@
-using BANxOpen.Foundation.Contracts.Common;
+using BANxOpen.Materials.Contracts;
 
 namespace BANxOpen.Ui.MaterialAssignment;
 

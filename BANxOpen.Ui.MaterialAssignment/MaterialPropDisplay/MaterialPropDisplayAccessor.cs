@@ -1,5 +1,5 @@
 using NXOpen.BlockStyler;
-using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Materials.Contracts;
 
 namespace BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 

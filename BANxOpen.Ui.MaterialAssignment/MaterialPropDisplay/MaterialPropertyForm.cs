@@ -1,7 +1,7 @@
 using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
-using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Materials.Contracts;
 
 namespace BANxOpen.Ui.MaterialAssignment.MaterialPropDisplay;
 

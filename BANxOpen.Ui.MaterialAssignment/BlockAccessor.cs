@@ -1,16 +1,16 @@
-using BANxOpen.Foundation.Core.Materials.Bodies;
+using BANxOpen.Materials.Core.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
-using BANxOpen.Foundation.Core.Materials.Library;
+using BANxOpen.Materials.Core.Library;
 using NXOpen;
 using NXOpen.BlockStyler;
-using BANxOpen.Foundation.NxAdapters.Materials;
-using BANxOpen.Foundation.Contracts.Materials;
+using BANxOpen.Materials.NxAdapters;
+using BANxOpen.Materials.Contracts;
 using BANxOpen.Foundation.NxAdapters;
 
 // NXOpen ships its own Material (a part attribute), SelectObject (a selection API type) and Group, all of which
 // collide with the ones meant here. Aliased rather than fully qualified at each use — this file mentions
 // them constantly.
-using Material = BANxOpen.Foundation.Contracts.Materials.Material;
+using Material = BANxOpen.Materials.Contracts.Material;
 using SelectObject = NXOpen.BlockStyler.SelectObject;
 using Group = NXOpen.BlockStyler.Group;
 using BANxOpen.Foundation.Contracts.Bodies;
