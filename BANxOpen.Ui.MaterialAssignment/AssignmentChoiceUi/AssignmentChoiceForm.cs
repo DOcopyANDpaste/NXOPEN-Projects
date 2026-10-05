@@ -90,6 +90,8 @@ internal sealed class AssignmentChoiceForm : Form
             GridLines = true,
             HideSelection = false,
             MultiSelect = false,
+            // A blocked option carries its reason as the item's tooltip.
+            ShowItemToolTips = true,
         };
 
         foreach (var column in choice.Columns)
@@ -166,6 +168,13 @@ internal sealed class AssignmentChoiceForm : Form
                     Tag = option.OptionId,
                 };
 
+                // Listed so the user sees the row exists; greyed, with the reason as its tooltip, because it cannot be taken.
+                if (option.BlockReason is { } blocked)
+                {
+                    item.ForeColor = System.Drawing.SystemColors.GrayText;
+                    item.ToolTipText = blocked;
+                }
+
                 foreach (var cell in option.Cells.Skip(1))
                     item.SubItems.Add(cell);
 
@@ -197,6 +206,13 @@ internal sealed class AssignmentChoiceForm : Form
     {
         if (SelectedOptionId() is not { } optionId || _choice.Find(optionId) is not { } option)
             return;
+
+        // A blocked option is refused with its reason; the window stays open for another pick.
+        if (option.BlockReason is { } blocked)
+        {
+            MessageBox.Show(this, blocked, _choice.Title, MessageBoxButtons.OK, MessageBoxIcon.Stop);
+            return;
+        }
 
         if (option.ConfirmationPrompt is { } prompt)
         {

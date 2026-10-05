@@ -5,6 +5,7 @@ using BANxOpen.Foundation.Contracts.Common;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.Core.RuleEngine;
 using BANxOpen.Foundation.Contracts.Bodies;
+using BANxOpen.SheetMetal.Materials;
 
 namespace BANxOpen.Ui.MaterialAssignment;
 
@@ -43,6 +44,14 @@ public sealed record PendingAssignmentEntry(
     /// Carried across re-plans: answers are keyed by body when they are built, so an entry that lost bodies
     /// simply has answers nobody reads.</summary>
     public IReadOnlyList<ResolvedAssignmentChoice> ResolvedChoices { get; init; } = Array.Empty<ResolvedAssignmentChoice>();
+
+    /// <summary>The sheet metal standards file row the user picked from the material tree, which the part's Sheet
+    /// Metal Preferences are set to when the entry's sheet metal bodies are assigned. Null when a plain physical
+    /// material was picked. Carried across re-plans like <see cref="ResolvedChoices"/>.</summary>
+    public SheetMetalMaterialRow? SheetMetalRow { get; init; }
+
+    /// <summary>How the entry is named to the user: the material, with the picked row when there is one.</summary>
+    public string DisplayName => SheetMetalRow is { } row ? $"{Material.Name} [{row.Name}]" : Material.Name;
 
     public static PendingAssignmentEntry Create(MaterialAssignmentPlanningInput input, AssignmentPlan plan)
     {

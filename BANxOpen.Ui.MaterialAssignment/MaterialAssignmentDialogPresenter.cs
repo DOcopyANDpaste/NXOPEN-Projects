@@ -8,6 +8,7 @@ using BANxOpen.Foundation.NxAdapters;
 using BANxOpen.Foundation.Contracts.Bodies;
 using BANxOpen.Foundation.Core.Materials.Rules.SheetMetal;
 using BANxOpen.SheetMetal.Materials;
+using BANxOpen.SheetMetal.NxAdapters.Common;
 using BANxOpen.Ui.MaterialAssignment.AssignmentChoiceUi;
 
 namespace BANxOpen.Ui.MaterialAssignment;
@@ -36,6 +37,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         public const int AddToPending = 102;
         public const int Properties = 103;
         public const int Refresh = 104;
+        public const int ApplySheetMetalPreference = 105;
     }
 
     private static class AssignmentMenu
@@ -65,11 +67,21 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     private readonly IAssignmentChoiceWindow _choiceWindow;
     private readonly SheetMetalStandardSelection _standardSelection;
     private readonly SheetMetalLibraries _sheetMetalLibraries;
+    private readonly SheetMetalMaterialTable _sheetMetalTable;
+    private readonly SheetMetalPreferenceService _sheetMetalPreferences;
     private readonly IMaterialPropertyWindow? _propertyWindow;
 
     private IReadOnlyList<MaterialLibraryReference> _libraries = Array.Empty<MaterialLibraryReference>();
+    private MaterialLibraryReference? _currentLibraryReference;
     private BANxOpen.Foundation.Contracts.Materials.MaterialLibrary? _currentLibrary;
-    private Material? _selectedMaterial;
+    private MaterialPick? _selectedPick;
+
+    // Sheet Metal Preferences. Only meaningful while a sheet metal library is selected: the standards file rows made of
+    // that library's materials, the filters the user set on them, and the rows those filters leave.
+    private bool _isSheetMetalLibrary;
+    private IReadOnlyList<SheetMetalMaterialRow> _libraryRows = Array.Empty<SheetMetalMaterialRow>();
+    private SheetMetalRowFilter _filter = SheetMetalRowFilter.None;
+    private IReadOnlyList<SheetMetalMaterialRow> _filteredRows = Array.Empty<SheetMetalMaterialRow>();
     private IReadOnlyList<BodyInfo> _allBodies = Array.Empty<BodyInfo>();
     private IReadOnlyDictionary<BodyId, BodyMaterialAssignment> _currentAssignments =
         new Dictionary<BodyId, BodyMaterialAssignment>();
@@ -92,10 +104,14 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         IAssignmentChoiceWindow choiceWindow,
         SheetMetalStandardSelection standardSelection,
         SheetMetalLibraries sheetMetalLibraries,
+        SheetMetalMaterialTable sheetMetalTable,
+        SheetMetalPreferenceService sheetMetalPreferences,
         IMaterialPropertyWindow? propertyWindow = null)
     {
         _standardSelection = standardSelection;
         _sheetMetalLibraries = sheetMetalLibraries;
+        _sheetMetalTable = sheetMetalTable;
+        _sheetMetalPreferences = sheetMetalPreferences;
         _context = context;
         _blocks = blocks;
         _partMaterialService = partMaterialService;
@@ -122,16 +138,11 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         _blocks.ClearHighlight();
         _blocks.SetUpColumns();
 
-        _libraries = _libraryRepository.ListAvailableLibraries();
-        _blocks.PopulateLibraryEnum(_libraries);
-
-        // Once only, for the same re-fire reason as the undo mark: a tab switch must not reset a Standard the user
-        // chose. The first Standard is the default.
-        if (_standardSelection.Selected is null)
-        {
-            _blocks.PopulateStandardEnum(_standardSelection.Standards);
-            _standardSelection.Selected = _blocks.GetSelectedStandard();
-        }
+        // Re-selects the library already in use, for the same re-fire reason as the undo mark: a re-fire must not
+        // throw away the library or the Sheet Metal Preferences filters the user chose. The filters live in _filter
+        // and are put back by OnLibrarySelectionChanged.
+        _libraries = ListLibrariesForApplication();
+        _blocks.PopulateLibraryEnum(_libraries, _currentLibraryReference?.Id);
 
         RefreshBodyState();
         RefreshAssignmentTree();
@@ -142,6 +153,22 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             OnLibrarySelectionChanged();
     }
 
+    /// <summary>Every library, except in the NX Sheet Metal application, where only sheet metal libraries are offered.
+    /// If none is configured there, every library is offered rather than none, and the gap is logged.</summary>
+    private IReadOnlyList<MaterialLibraryReference> ListLibrariesForApplication()
+    {
+        var all = _libraryRepository.ListAvailableLibraries();
+        if (!_context.IsSheetMetalApplication)
+            return all;
+
+        var sheetMetal = all.Where(l => _sheetMetalLibraries.IsSheetMetalLibrary(l.Id)).ToList();
+        if (sheetMetal.Count > 0)
+            return sheetMetal;
+
+        _context.Log.Warn("NX is in the Sheet Metal application, but no available library is a sheet metal library; listing every library.");
+        return all;
+    }
+
     public void OnUpdate(string changedBlockId)
     {
         switch (changedBlockId)
@@ -150,9 +177,16 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 OnLibrarySelectionChanged();
                 break;
             case BlockAccessor.StandardEnumId:
-                // Only decides which rows the Sheet Metal Preferences are offered; the material tree is unaffected.
-                // Staged entries keep the row they were answered with.
-                _standardSelection.Selected = _blocks.GetSelectedStandard();
+            case BlockAccessor.SmPhysicalMaterialEnumId:
+            case BlockAccessor.SmThicknessEnumId:
+            case BlockAccessor.SmBendRadiusEnumId:
+                // Staged entries keep the row they were staged with; only what can be picked next changes.
+                _filter = _blocks.GetSheetMetalFilter();
+                RefreshMaterialTree();
+                break;
+            case BlockAccessor.SmClearButtonId:
+                _filter = SheetMetalRowFilter.None;
+                RefreshMaterialTree();
                 break;
             case BlockAccessor.SelectAllButtonId:
                 OnSelectAllSolidsClicked();
@@ -171,25 +205,37 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         }
     }
 
+    /// <summary>Commits what is pending. With nothing pending and a sheet metal material picked (see
+    /// <see cref="PickedSheetMetalMaterial"/>), applies that instead — see <see cref="ApplyPickedSheetMetalMaterial"/>.</summary>
     public int OnApply()
     {
-        if (_pending.Count == 0)
+        if (_pending.Count > 0)
         {
-            _blocks.ShowError(
-                "Nothing is pending. Select bodies, then right-click a material and choose \"Add to pending\".");
-            return 1;
+            CommitPending();
+            return 0;
         }
 
-        CommitPending();
-        return 0;
+        if (PickedSheetMetalMaterial() is { } pick)
+            return ApplyPickedSheetMetalMaterial(pick) ? 0 : 1;
+
+        _blocks.ShowError(
+            "Nothing is pending. Select bodies, then right-click a material and choose \"Add to pending\"." +
+            (_isSheetMetalLibrary
+                ? $"{Environment.NewLine}{Environment.NewLine}For a sheet metal library you can also pick a sheet metal " +
+                  "material (a row under a physical material) and Apply it."
+                : string.Empty));
+        return 1;
     }
 
     // Unlike OnApply, an empty pending list on OK is a normal end state (e.g. every assignment was made via
-    // "Assign now", which never touches _pending) — not something worth blocking the dialog's close on.
+    // "Assign now", which never touches _pending) — not something worth blocking the dialog's close on. A picked
+    // sheet metal material is applied the same way Apply would; backing out of it keeps the dialog open.
     public int OnOk()
     {
         if (_pending.Count > 0)
             CommitPending();
+        else if (PickedSheetMetalMaterial() is { } pick && !ApplyPickedSheetMetalMaterial(pick))
+            return 1;
 
         _blocks.ClearHighlight();
         CloseKeepingChanges();
@@ -274,6 +320,89 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         ReplanPending();
     }
 
+    // ---- Sheet Metal Preferences without bodies ----
+
+    /// <summary>The sheet metal material Apply/OK act on when nothing is pending: the row selected in the material
+    /// tree, else the only row the filters leave. Null outside a sheet metal library, or when no single row is picked.</summary>
+    private MaterialPick? PickedSheetMetalMaterial()
+    {
+        if (!_isSheetMetalLibrary || _currentLibrary is null)
+            return null;
+
+        if (_selectedPick is { Row: not null })
+            return _selectedPick;
+
+        if (_filteredRows.Count != 1)
+            return null;
+
+        var row = _filteredRows[0];
+        var material = _currentLibrary.Materials.FirstOrDefault(m => SameName(m.Name, row.PhysicalMaterialName));
+        return material is null ? null : new MaterialPick(material, row);
+    }
+
+    /// <summary>Apply/OK with a sheet metal material picked and nothing pending. With bodies selected it assigns the
+    /// material to them, as "Assign to selected bodies" would. With none, it sets only the part's Sheet Metal
+    /// Preferences, after warning that the bodies' own material and colour are left as they are.</summary>
+    /// <returns>False when nothing was applied — the user backed out, or NX refused.</returns>
+    private bool ApplyPickedSheetMetalMaterial(MaterialPick pick)
+    {
+        if (_blocks.GetSelectedBodyIds().Count > 0)
+            return AssignNow(pick);
+
+        var row = pick.Row!;
+        var message =
+            $"No solid body is selected. Only the part's Sheet Metal Preferences will be set to '{row.Name}' " +
+            $"({BlockAccessor.SheetMetalRowText(row)}).{Environment.NewLine}{Environment.NewLine}" +
+            "The physical material and display material (colour) of the bodies will NOT be updated. Select the bodies " +
+            "and Apply or Assign again to update them." +
+            DifferentSheetMetalBodiesNote(row) +
+            $"{Environment.NewLine}{Environment.NewLine}Continue?";
+
+        return _blocks.Confirm(message) && ApplySheetMetalPreferenceOnly(row);
+    }
+
+    /// <summary>Sets the part's Sheet Metal Preferences to <paramref name="row"/> and nothing else — no body is
+    /// assigned and nothing is staged. Recorded like any other change, so Cancel can revert it.</summary>
+    private bool ApplySheetMetalPreferenceOnly(SheetMetalMaterialRow row)
+    {
+        // The service sets no undo mark of its own; a refused change must not leave a half-built preferences edit.
+        OperationResult result;
+        using (var undo = new UndoScope(_context.Session, "Set Sheet Metal Preferences", _context.Log.Error))
+        {
+            result = _sheetMetalPreferences.SyncMaterial(row);
+            if (result.Ok)
+                undo.Commit();
+        }
+
+        _blocks.ShowResult(result,
+            $"Sheet Metal Preferences set to '{row.Name}'.{Environment.NewLine}{Environment.NewLine}" +
+            "The physical material and display material (colour) of the bodies were not changed. Select the bodies " +
+            "and Apply or Assign again to update them." +
+            DifferentSheetMetalBodiesNote(row));
+
+        RecordApplied(result, $"Sheet Metal Preferences set to {row.Name}");
+        OnRefreshClicked();
+        return result.Ok;
+    }
+
+    /// <summary>Names the sheet metal bodies whose material is not the one <paramref name="row"/> is made of, since the
+    /// preferences and their material will disagree until they are reassigned. Empty when there are none.</summary>
+    private string DifferentSheetMetalBodiesNote(SheetMetalMaterialRow row)
+    {
+        var differing = _allBodies
+            .Where(b => b.Kind == BodyKind.SheetMetal)
+            .Select(b => (Body: b, Material: _currentAssignments.TryGetValue(b.Id, out var a) ? a.MaterialName : null))
+            .Where(x => !SameName(x.Material, row.PhysicalMaterialName))
+            .Select(x => $"  [{x.Body.Name}] {x.Material ?? MaterialUsageRow.UnassignedLabel}")
+            .ToList();
+
+        return differing.Count == 0
+            ? string.Empty
+            : $"{Environment.NewLine}{Environment.NewLine}These sheet metal bodies are not {row.PhysicalMaterialName}, so " +
+              $"their material will not match the preferences until they are reassigned:{Environment.NewLine}" +
+              string.Join(Environment.NewLine, differing);
+    }
+
     // ---- Quick selection buttons ----
 
     /// <summary>Sheet metal bodies are solids in NX, so the solid-body shortcuts include them. Their own kind
@@ -316,32 +445,78 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         if (reference is null)
             return;
 
+        _currentLibraryReference = reference;
         _currentLibrary = _libraryLoader.GetOrLoad(reference);
         _partMaterialService.SetResolutionLibraries(new[] { _currentLibrary });
 
-        // The Standard only matters for materials that can go on sheet metal bodies.
-        _blocks.SetStandardVisible(_sheetMetalLibraries.IsSheetMetalLibrary(reference.Id));
+        // The Sheet Metal Preferences only mean anything for materials that can go on sheet metal bodies.
+        _isSheetMetalLibrary = _sheetMetalLibraries.IsSheetMetalLibrary(reference.Id);
+        _blocks.SetSheetMetalPreferencesVisible(_isSheetMetalLibrary);
 
-        _blocks.PopulateMaterialTree(_categoryTreeBuilder.Build(_currentLibrary));
+        var materialNames = _currentLibrary.Materials.Select(m => m.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        _libraryRows = _isSheetMetalLibrary
+            ? _sheetMetalTable.Rows.Where(r => materialNames.Contains(r.PhysicalMaterialName)).ToList()
+            : Array.Empty<SheetMetalMaterialRow>();
 
-        // Switching library invalidates the previously picked material.
-        _selectedMaterial = null;
-        _blocks.SetMaterialLabel(null);
+        RefreshMaterialTree();
 
         // Resolution against the newly loaded library may change which rows now have a ResolvedMaterialId,
         // even though body-to-material-name assignments themselves haven't changed.
         RefreshAssignmentTree();
     }
 
-    public void OnMaterialSelected(Material? material)
+    /// <summary>Rebuilds the material tree for the current library. For a sheet metal library it also refills the
+    /// filter dropdowns, and lists under each physical material the standards file rows the filters leave. With no
+    /// filter, every physical material is listed, so one with no row can still go on a plain solid; with a filter,
+    /// only the materials that still have a row are.</summary>
+    private void RefreshMaterialTree()
     {
-        _selectedMaterial = material;
-        _blocks.SetMaterialLabel(material);
+        if (_currentLibrary is null)
+            return;
+
+        if (!_isSheetMetalLibrary)
+        {
+            _filteredRows = Array.Empty<SheetMetalMaterialRow>();
+            _blocks.PopulateMaterialTree(_categoryTreeBuilder.Build(_currentLibrary));
+        }
+        else
+        {
+            _blocks.PopulateSheetMetalFilters(_libraryRows, _filter);
+
+            // Read back: a value the other filters no longer allow falls back to "(Any)" in its dropdown.
+            _filter = _blocks.GetSheetMetalFilter();
+
+            // The rule's own row list follows the Standard, so the rows it offers are the rows the tree shows.
+            _standardSelection.Selected = _filter.Standard;
+
+            _filteredRows = _filter.Apply(_libraryRows);
+            var rowsByMaterial = _filteredRows
+                .GroupBy(r => r.PhysicalMaterialName, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => (IReadOnlyList<SheetMetalMaterialRow>)g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+            var materials = _filter.IsEmpty
+                ? _currentLibrary.Materials
+                : _currentLibrary.Materials.Where(m => rowsByMaterial.ContainsKey(m.Name)).ToList();
+
+            _blocks.PopulateMaterialTree(
+                _categoryTreeBuilder.Build(_currentLibrary with { Materials = materials }),
+                m => rowsByMaterial.TryGetValue(m.Name, out var rows) ? rows : Array.Empty<SheetMetalMaterialRow>());
+        }
+
+        // A rebuilt tree invalidates the previously picked material.
+        _selectedPick = null;
+        _blocks.SetMaterialLabel(null);
     }
 
-    // Hover only retitles the label; it deliberately does not change _selectedMaterial, or moving the
+    public void OnMaterialSelected(MaterialPick? pick)
+    {
+        _selectedPick = pick;
+        _blocks.SetMaterialLabel(pick);
+    }
+
+    // Hover only retitles the label; it deliberately does not change _selectedPick, or moving the
     // pointer across the tree would silently repoint what an Assign command acts on.
-    public void OnMaterialHovered(Material? material) => _blocks.SetMaterialLabel(material ?? _selectedMaterial);
+    public void OnMaterialHovered(MaterialPick? pick) => _blocks.SetMaterialLabel(pick ?? _selectedPick);
 
     public void OnAssignmentSelected(AssignmentRowRef? row) => _blocks.SetAssignmentLabel(row);
 
@@ -349,9 +524,16 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     public void OnPendingSelected(PendingRowRef? row) => _blocks.SetPendingLabel(row);
 
-    public string OnMaterialTooltip(Material material)
+    public string OnMaterialTooltip(MaterialPick pick)
     {
-        var lines = new List<string> { material.Name };
+        var material = pick.Material;
+        var lines = new List<string> { pick.DisplayName };
+
+        if (pick.Row is { } row)
+        {
+            lines.Add($"Sheet metal material made of {material.Name}");
+            lines.Add(BlockAccessor.SheetMetalRowText(row));
+        }
 
         if (material.Category.PathSegments.Count > 0)
             lines.Add(string.Join(" > ", material.Category.PathSegments));
@@ -364,11 +546,11 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         return string.Join(Environment.NewLine, lines);
     }
 
-    public void OnMaterialDefaultAction(Material material) => ShowProperties(material);
+    public void OnMaterialDefaultAction(MaterialPick pick) => ShowProperties(pick.Material);
 
     // ---- Material tree menu ----
 
-    public IReadOnlyList<TreeMenuItem> BuildMaterialMenu(Material? clicked)
+    public IReadOnlyList<TreeMenuItem> BuildMaterialMenu(MaterialPick? clicked)
     {
         if (clicked is null)
             return new[] { new TreeMenuItem(MaterialMenu.Refresh, "Refresh") };
@@ -376,50 +558,61 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         // Assignment needs a target, and the selection block is the only source of one.
         var hasBodies = _blocks.GetSelectedBodyIds().Count > 0;
 
-        return new[]
+        var items = new List<TreeMenuItem>
         {
-            new TreeMenuItem(MaterialMenu.AssignNow, "Assign to selected bodies", hasBodies),
-            new TreeMenuItem(MaterialMenu.AddToPending, "Add to pending", hasBodies),
-            TreeMenuItem.Separator,
-            new TreeMenuItem(MaterialMenu.Properties, "Properties..."),
-            new TreeMenuItem(MaterialMenu.Refresh, "Refresh"),
+            new(MaterialMenu.AssignNow, "Assign to selected bodies", hasBodies),
+            new(MaterialMenu.AddToPending, "Add to pending", hasBodies),
         };
+
+        // Sets the part's preferences straight away — no bodies, nothing staged. Only a row can be applied.
+        if (_isSheetMetalLibrary)
+            items.Add(new TreeMenuItem(MaterialMenu.ApplySheetMetalPreference, "Apply sheet metal preference", clicked.Row is not null));
+
+        items.Add(TreeMenuItem.Separator);
+        items.Add(new TreeMenuItem(MaterialMenu.Properties, "Properties..."));
+        items.Add(new TreeMenuItem(MaterialMenu.Refresh, "Refresh"));
+        return items;
     }
 
-    public void OnMaterialMenuCommand(int menuItemId, IReadOnlyList<Material> targets)
+    public void OnMaterialMenuCommand(int menuItemId, IReadOnlyList<MaterialPick> targets)
     {
-        var material = targets.FirstOrDefault() ?? _selectedMaterial;
+        var pick = targets.FirstOrDefault() ?? _selectedPick;
 
         switch (menuItemId)
         {
             case MaterialMenu.Refresh:
                 OnRefreshClicked();
                 return;
-            case MaterialMenu.Properties when material is not null:
-                ShowProperties(material);
+            case MaterialMenu.Properties when pick is not null:
+                ShowProperties(pick.Material);
                 return;
-            case MaterialMenu.AssignNow when material is not null:
-                AssignNow(material);
+            case MaterialMenu.AssignNow when pick is not null:
+                AssignNow(pick);
                 return;
-            case MaterialMenu.AddToPending when material is not null:
-                AddToPending(material);
+            case MaterialMenu.AddToPending when pick is not null:
+                AddToPending(pick);
+                return;
+            case MaterialMenu.ApplySheetMetalPreference when pick?.Row is { } row:
+                ApplySheetMetalPreferenceOnly(row);
                 return;
         }
     }
 
-    private void AssignNow(Material material)
+    /// <returns>False when nothing was applied: the entry could not be built, or the user backed out of a question.</returns>
+    private bool AssignNow(MaterialPick pick)
     {
-        var entry = BuildResolvedEntry(material);
+        var entry = BuildResolvedEntry(pick);
         if (entry is null)
-            return;
+            return false;
 
         CommitEntry(entry);
         OnRefreshClicked();
+        return true;
     }
 
-    private void AddToPending(Material material)
+    private void AddToPending(MaterialPick pick)
     {
-        var entry = BuildResolvedEntry(material);
+        var entry = BuildResolvedEntry(pick);
         if (entry is null)
             return;
 
@@ -448,8 +641,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 continue;
             }
 
-            _pending[i] = Replan(entry.Material, keptRows.Select(r => r.Body).ToList())
-                with { ResolvedChoices = entry.ResolvedChoices };
+            _pending[i] = Replan(entry, keptRows.Select(r => r.Body).ToList());
         }
     }
 
@@ -610,7 +802,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     /// <summary>Plans the currently selected bodies against <paramref name="material"/>, or reports why it
     /// cannot and returns null.</summary>
-    private PendingAssignmentEntry? BuildEntry(Material material)
+    private PendingAssignmentEntry? BuildEntry(MaterialPick pick)
     {
         var selectedIds = _blocks.GetSelectedBodyIds();
         if (selectedIds.Count == 0)
@@ -628,33 +820,34 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return null;
         }
 
-        return Replan(material, targets);
+        return Replan(pick.Material, targets) with { SheetMetalRow = pick.Row };
     }
 
     /// <summary>Plans the selection, refuses a second sheet metal material, then puts the rules' questions to the
     /// user — all before anything is applied or staged, so a staged entry already carries its answers. Returns
     /// null when the entry cannot be built, conflicts, or the user cancelled a question.</summary>
-    private PendingAssignmentEntry? BuildResolvedEntry(Material material)
+    private PendingAssignmentEntry? BuildResolvedEntry(MaterialPick pick)
     {
-        var entry = BuildEntry(material);
+        var entry = BuildEntry(pick);
         if (entry is null)
             return null;
 
-        if (FindSheetMetalConflict(material, entry.Rows.Select(r => r.Body).ToList()) is { } conflict)
+        // The Sheet Metal Preferences are set to the row the user picks in the tree, never to one guessed from the
+        // physical material. Bodies a rule already blocks are left to that rule's own message.
+        if (pick.Row is null
+            && entry.Rows.Any(r => r.Body.Kind == BodyKind.SheetMetal && r.Status != PendingBodyStatus.Blocked))
         {
-            _blocks.ShowError(conflict);
+            _blocks.ShowError(
+                $"Sheet metal bodies need a sheet metal material, not just '{pick.Material.Name}'.{Environment.NewLine}{Environment.NewLine}" +
+                $"Expand '{pick.Material.Name}' in the material tree and pick one of its rows (Standard, thickness, bend " +
+                "radius) — that is what the part's Sheet Metal Preferences are set to. Use the Sheet Metal Preferences " +
+                "filters to narrow the rows.");
             return null;
         }
 
-        // A material with no row at all is blocked by the engine's own constraint; one with rows only under other
-        // Standards is not, so it is refused here, before anything is staged or applied.
-        if (entry.Rows.Any(r => r.Body.Kind == BodyKind.SheetMetal)
-            && _standardSelection.Selected is { } standard
-            && _standardSelection.RowsFor(material.Name).Count == 0)
+        if (FindSheetMetalConflict(entry.Material, entry.SheetMetalRow, entry.Rows.Select(r => r.Body).ToList()) is { } conflict)
         {
-            _blocks.ShowError(
-                $"'{material.Name}' has no row under Standard '{standard}' in the sheet metal material standards " +
-                "file, so Sheet Metal Preferences cannot be set to it. Choose another Standard.");
+            _blocks.ShowError(conflict);
             return null;
         }
 
@@ -665,58 +858,95 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     }
 
     /// <summary>NX keeps one set of Sheet Metal Preferences per part, so every sheet metal body in it has to share
-    /// a material — assigning a second one would re-point the preferences out from under the first. Returns why
-    /// <paramref name="material"/> cannot go onto <paramref name="targets"/>, or null when it can.
+    /// a material and a preferences row — assigning a second one would re-point the preferences out from under the
+    /// first. Returns why <paramref name="material"/> (as <paramref name="row"/>) cannot go onto
+    /// <paramref name="targets"/>, or null when it can.
     ///
     /// Only the sheet metal bodies outside <paramref name="targets"/> count: the targets are about to take
     /// <paramref name="material"/>, so re-assigning every sheet metal body at once is not a conflict. A body
-    /// claimed by a staged entry counts as that entry's material, since that is what it will have. Regular solids
-    /// have no shared state, so a selection with no sheet metal body never conflicts.</summary>
-    private string? FindSheetMetalConflict(Material material, IReadOnlyList<BodyInfo> targets)
+    /// claimed by a staged entry counts as that entry's material and row, since that is what it will have. A body
+    /// already assigned counts as the part's current preferences row when that row is made of its material. Regular
+    /// solids have no shared state, so a selection with no sheet metal body never conflicts.</summary>
+    private string? FindSheetMetalConflict(Material material, SheetMetalMaterialRow? row, IReadOnlyList<BodyInfo> targets)
     {
         if (!targets.Any(b => b.Kind == BodyKind.SheetMetal))
             return null;
 
         var targetIds = targets.Select(b => b.Id).ToHashSet();
 
-        var stagedMaterial = new Dictionary<BodyId, string>();
+        var stagedEntries = new Dictionary<BodyId, PendingAssignmentEntry>();
         foreach (var entry in _pending)
         {
-            foreach (var row in entry.Rows)
-                stagedMaterial[row.Body.Id] = entry.Material.Name;
+            foreach (var pendingRow in entry.Rows)
+                stagedEntries[pendingRow.Body.Id] = entry;
         }
 
-        var conflicting = _allBodies
-            .Where(b => b.Kind == BodyKind.SheetMetal && !targetIds.Contains(b.Id))
-            .Select(b =>
+        // Read lazily, once: it is an NX query, and most parts have no other sheet metal body to compare against.
+        SheetMetalMaterialRow? partRow = null;
+        var partRowRead = false;
+
+        var conflicting = new List<(BodyInfo Body, string Material, bool IsStaged)>();
+        foreach (var body in _allBodies.Where(b => b.Kind == BodyKind.SheetMetal && !targetIds.Contains(b.Id)))
+        {
+            string? otherMaterial;
+            SheetMetalMaterialRow? otherRow;
+            var isStaged = stagedEntries.TryGetValue(body.Id, out var staged);
+
+            if (isStaged)
             {
-                var name = stagedMaterial.TryGetValue(b.Id, out var staged)
-                    ? staged
-                    : _currentAssignments.TryGetValue(b.Id, out var current) ? current.MaterialName : null;
-                return (Body: b, Material: name, IsStaged: staged is not null);
-            })
-            .Where(x => x.Material is not null
-                        && !string.Equals(x.Material, material.Name, StringComparison.OrdinalIgnoreCase))
-            .ToList();
+                otherMaterial = staged!.Material.Name;
+                otherRow = staged.SheetMetalRow;
+            }
+            else
+            {
+                otherMaterial = _currentAssignments.TryGetValue(body.Id, out var current) ? current.MaterialName : null;
+                if (otherMaterial is null)
+                    continue;
+
+                if (!partRowRead)
+                {
+                    partRow = _sheetMetalPreferences.ReadForPart().Preference?.Row;
+                    partRowRead = true;
+                }
+
+                otherRow = partRow is not null && SameName(partRow.PhysicalMaterialName, otherMaterial) ? partRow : null;
+            }
+
+            // An unknown row on either side cannot be told apart, so only the material is compared then.
+            var sameMaterial = SameName(otherMaterial, material.Name);
+            var sameRow = row is null || otherRow is null || SameName(otherRow.Name, row.Name);
+            if (sameMaterial && sameRow)
+                continue;
+
+            conflicting.Add((body, otherRow is null ? otherMaterial : $"{otherMaterial} [{otherRow.Name}]", isStaged));
+        }
 
         if (conflicting.Count == 0)
             return null;
 
+        var name = row is null ? material.Name : $"{material.Name} [{row.Name}]";
         var details = conflicting.Select(x => $"  [{x.Body.Name}] {x.Material}{(x.IsStaged ? " (pending)" : string.Empty)}");
         return
-            $"{material.Name} cannot be assigned to sheet metal bodies in this part.{Environment.NewLine}{Environment.NewLine}" +
+            $"{name} cannot be assigned to sheet metal bodies in this part.{Environment.NewLine}{Environment.NewLine}" +
             $"Sheet Metal Preferences belong to the part, so every sheet metal body in it must have the same " +
-            $"material, and these already have a different one:{Environment.NewLine}" +
+            $"material and preferences row, and these already have a different one:{Environment.NewLine}" +
             string.Join(Environment.NewLine, details) +
-            $"{Environment.NewLine}{Environment.NewLine}Nothing was assigned or staged. Assign {material.Name} to all of the " +
+            $"{Environment.NewLine}{Environment.NewLine}Nothing was assigned or staged. Assign {name} to all of the " +
             "sheet metal bodies together, or leave the sheet metal bodies out of the selection.";
     }
+
+    private static bool SameName(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
     private PendingAssignmentEntry Replan(Material material, IReadOnlyList<BodyInfo> targets)
     {
         var input = new MaterialAssignmentPlanningInput(material, targets, _currentAssignments);
         return PendingAssignmentEntry.Create(input, _planner.Plan(input));
     }
+
+    /// <summary>Re-plans a staged entry onto <paramref name="targets"/>, keeping what the user decided when staging it:
+    /// the answers to the rules' questions and the picked sheet metal row.</summary>
+    private PendingAssignmentEntry Replan(PendingAssignmentEntry entry, IReadOnlyList<BodyInfo> targets) =>
+        Replan(entry.Material, targets) with { ResolvedChoices = entry.ResolvedChoices, SheetMetalRow = entry.SheetMetalRow };
 
     /// <summary>Re-plans every staged entry against freshly-read part state. Without this a staged entry keeps
     /// the outcomes it was created with, so a body that gained a material since staging would still show as an
@@ -732,7 +962,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 .ToList();
 
             if (stillPresent.Count > 0)
-                _pending[i] = Replan(entry.Material, stillPresent) with { ResolvedChoices = entry.ResolvedChoices };
+                _pending[i] = Replan(entry, stillPresent);
         }
 
         _pending.RemoveAll(e => e.Rows.Count == 0);
@@ -745,13 +975,13 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     {
         if (!entry.HasAnyApplicableBody)
         {
-            _blocks.ShowError($"Every body staged for {entry.Material.Name} is blocked by a rule; nothing was applied.");
+            _blocks.ShowError($"Every body staged for {entry.DisplayName} is blocked by a rule; nothing was applied.");
             return;
         }
 
         // Checked again because the dialog is interactive: the part may have gained a sheet metal material since
         // the entry was staged.
-        if (FindSheetMetalConflict(entry.Material, entry.Rows.Select(r => r.Body).ToList()) is { } conflict)
+        if (FindSheetMetalConflict(entry.Material, entry.SheetMetalRow, entry.Rows.Select(r => r.Body).ToList()) is { } conflict)
         {
             _blocks.ShowError(conflict);
             return;
@@ -765,7 +995,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
         var executablePlan = _finalizer.Finalize(entry.Plan, entry.Input, confirmedBodyIds, answers.Build());
         var result = _partMaterialService.ApplyPlan(executablePlan);
-        RecordApplied(result, $"{entry.Material.Name} assigned to {executablePlan.Assignments.Count} body(ies)");
+        RecordApplied(result, $"{entry.DisplayName} assigned to {executablePlan.Assignments.Count} body(ies)");
 
         // Warnings never stop an assignment, but "Assign now" skips the pending tree where they would otherwise
         // be seen — for example a bead on the body that matches no SPEC, whose restriction is therefore not
@@ -777,7 +1007,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
         warnings.AddRange(entry.ResolvedChoices.SelectMany(c => c.Warnings));
 
-        var summary = $"{entry.Material.Name} applied to {executablePlan.Assignments.Count} body(ies).";
+        var summary = $"{entry.DisplayName} applied to {executablePlan.Assignments.Count} body(ies).";
         if (warnings.Count > 0)
             summary += $"{Environment.NewLine}{Environment.NewLine}Warnings:{Environment.NewLine}{string.Join(Environment.NewLine, warnings)}";
 
@@ -828,6 +1058,18 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
         foreach (var question in questions)
         {
+            // The row picked in the tree answers the Sheet Metal Preferences question outright: no window, and no
+            // automatic or previously staged answer overrides what the user chose.
+            if (entry.SheetMetalRow is { } row
+                && string.Equals(question.Choice.ChoiceId, SheetMetalRowChoiceProvider.ChoiceIdentifier, StringComparison.Ordinal))
+            {
+                if (TryAnswerWithPickedRow(entry, question, row) is not { } picked)
+                    return false;
+
+                answered.Add(picked);
+                continue;
+            }
+
             if (FindStagedAnswer(entry.Material, question) is { } staged)
             {
                 answered.Add(new ResolvedAssignmentChoice(question, staged.OptionId, Array.Empty<string>()));
@@ -856,6 +1098,42 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         return true;
     }
 
+    /// <summary>Answers the Sheet Metal Preferences question with <paramref name="row"/>. The rule still decides what
+    /// may be picked: a row it does not offer for these bodies is refused, a row it blocks (the part's sheet metal
+    /// requirements refuse it) is refused with the rule's reason, and one it marks as not matching the body's
+    /// thickness is confirmed with the user first, using the rule's own prompt.</summary>
+    /// <returns>Null when the row cannot be used or the user declined it.</returns>
+    private ResolvedAssignmentChoice? TryAnswerWithPickedRow(
+        PendingAssignmentEntry entry, PendingAssignmentChoice question, SheetMetalMaterialRow row)
+    {
+        if (question.Choice.Find(row.Name) is not { } option)
+        {
+            _blocks.ShowError(
+                $"'{row.Name}' is not one of the Sheet Metal Preferences materials that can be set for " +
+                $"{entry.Material.Name} on these bodies. Pick another row.");
+            return null;
+        }
+
+        if (option.BlockReason is { } blocked)
+        {
+            _blocks.ShowError($"'{row.Name}' cannot be used: {blocked}");
+            _context.Log.Info($"'{row.Name}' is blocked ({blocked}); {entry.Material.Name} was not assigned to {question.BodyIds.Count} body(ies).");
+            return null;
+        }
+
+        if (option.ConfirmationPrompt is not { } prompt)
+            return new ResolvedAssignmentChoice(question, row.Name, Array.Empty<string>());
+
+        if (!_blocks.Confirm(prompt))
+        {
+            _context.Log.Info($"'{row.Name}' was declined; {entry.Material.Name} was not assigned to {question.BodyIds.Count} body(ies).");
+            return null;
+        }
+
+        // As the choice window records a confirmed option, so the result message says why the part disagrees.
+        return new ResolvedAssignmentChoice(question, row.Name, new[] { prompt.Replace(Environment.NewLine, " ") });
+    }
+
     private ResolvedAssignmentChoice? FindStagedAnswer(Material material, PendingAssignmentChoice question) =>
         _pending
             .Where(e => string.Equals(e.Material.Name, material.Name, StringComparison.OrdinalIgnoreCase))
@@ -863,7 +1141,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             .FirstOrDefault(c =>
                 string.Equals(c.Question.Choice.ChoiceId, question.Choice.ChoiceId, StringComparison.Ordinal)
                 && string.Equals(c.Question.Choice.GroupKey, question.Choice.GroupKey, StringComparison.Ordinal)
-                && question.Choice.Find(c.OptionId) is not null);
+                // An answer staged before a requirement started refusing it is not carried over.
+                && question.Choice.Find(c.OptionId) is { IsBlocked: false });
 
     /// <summary>Asks the user to confirm the bodies whose rules returned RequireConfirmation — chiefly
     /// reassignment over an existing material, and coating display-material mismatches.

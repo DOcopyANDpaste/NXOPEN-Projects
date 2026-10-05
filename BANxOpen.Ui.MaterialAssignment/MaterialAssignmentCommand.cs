@@ -86,6 +86,8 @@ public static class MaterialAssignmentCommand
             choiceWindow,
             sheetMetalServices.StandardSelection,
             materials.SheetMetalLibraries,
+            sheetMetalServices.MaterialTable,
+            sheetMetalServices.PreferenceService,
             propertyWindow);
 
         dialog.Presenter = presenter;

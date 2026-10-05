@@ -7,12 +7,15 @@ using BANxOpen.Foundation.NxAdapters.Materials;
 using BANxOpen.Foundation.Contracts.Materials;
 using BANxOpen.Foundation.NxAdapters;
 
-// NXOpen ships its own Material (a part attribute) and SelectObject (a selection API type), both of which
+// NXOpen ships its own Material (a part attribute), SelectObject (a selection API type) and Group, all of which
 // collide with the ones meant here. Aliased rather than fully qualified at each use — this file mentions
 // them constantly.
 using Material = BANxOpen.Foundation.Contracts.Materials.Material;
 using SelectObject = NXOpen.BlockStyler.SelectObject;
+using Group = NXOpen.BlockStyler.Group;
 using BANxOpen.Foundation.Contracts.Bodies;
+using BANxOpen.SheetMetal.Beads.Rules;
+using BANxOpen.SheetMetal.Materials;
 
 namespace BANxOpen.Ui.MaterialAssignment;
 
@@ -43,6 +46,11 @@ public sealed class BlockAccessor
     internal const string SelectUnassignedButtonId = "selectUnassignedButton";
     internal const string LibraryEnumId = "enum_MatLibrary";
     internal const string StandardEnumId = "enum_SmStandard";
+    internal const string SmPreferencesGroupId = "group_SMPref";
+    internal const string SmPhysicalMaterialEnumId = "enum_SmPhyMatName";
+    internal const string SmThicknessEnumId = "enum_smTHK";
+    internal const string SmBendRadiusEnumId = "enum_SmBendRad";
+    internal const string SmClearButtonId = "btn_SmClearSelection";
     internal const string MaterialTreeId = "MaterialTree";
     internal const string CurrentAssignmentTreeId = "CurrentAssignmentTree";
     internal const string PendingAssignmentTreeId = "PendingAssignments";
@@ -64,6 +72,10 @@ public sealed class BlockAccessor
     /// <summary>What a material label shows when its tree has nothing selected. The blocks are designed
     /// with the placeholder text "XX_MaterialName", which would otherwise sit there looking like data.</summary>
     private const string NoMaterialLabel = "(no material selected)";
+
+    /// <summary>The first member of every Sheet Metal Preferences filter dropdown. An enumeration cannot be left with
+    /// nothing selected, so "no filter" is a member of its own.</summary>
+    private const string AnyFilterValue = "(Any)";
 
     // Column ids. Both trees in the .dlx have ShowHeader/ShowMultipleColumns true but declare no columns at
     // design time, so these are created at runtime in SetUpColumns.
@@ -98,7 +110,11 @@ public sealed class BlockAccessor
 
     private SelectObject? _selectedBodies;
     private Enumeration? _libraryEnum;
-    private Enumeration? _standardEnum;
+    private Group? _sheetMetalPreferencesGroup;
+    private readonly FilterEnum<string> _standardFilter = new();
+    private readonly FilterEnum<string> _physicalMaterialFilter = new();
+    private readonly FilterEnum<double> _thicknessFilter = new();
+    private readonly FilterEnum<string> _bendRadiusFilter = new();
     private TabControl? _tabControl;
     private Tree? _materialTree;
     private Tree? _currentAssignmentTree;
@@ -107,7 +123,7 @@ public sealed class BlockAccessor
     private Label? _assignmentLabel;
     private Label? _pendingLabel;
 
-    private TreeBinding<Material>? _materials;
+    private TreeBinding<MaterialPick>? _materials;
     private TreeBinding<AssignmentRowRef>? _assignments;
     private TreeBinding<PendingRowRef>? _pending;
 
@@ -121,21 +137,44 @@ public sealed class BlockAccessor
     /// SetUpColumns re-ran on every node change); with TabControl, the presenter's OnUpdate also calls
     /// <see cref="SetUpColumns"/> on a tab switch as a second trigger, since it's unconfirmed whether tab
     /// switches still route through dialogShown_cb. Either way, column setup must be idempotent per page
-    /// rather than a one-time dialog step. A tree's columns are only ever touched once — the first time its
-    /// page becomes current — and any populate call that arrives before that point is remembered and
-    /// replayed at that moment instead of running immediately.</summary>
+    /// rather than a one-time dialog step.
+    ///
+    /// Whether a tree is ready is asked of the tree itself (<see cref="HasLiveColumns"/>), never remembered: a
+    /// tree's native control can be gone, or rebuilt without its columns, after the page was first set up — an
+    /// off-screen page, or NX recreating the controls after Apply. A remembered flag then sends a rebuild at a
+    /// control that is not there, which is what used to kill the trees on Apply/Refresh with an NXException on
+    /// Redraw. Any populate that cannot run now is kept and replayed the next time the page is set up, and the
+    /// last one that ran is kept too, so a tree whose control was rebuilt is refilled with its latest data.</summary>
     private sealed class NodeState
     {
-        public bool ColumnsReady;
+        public NodeState(string label, int columnCount)
+        {
+            Label = label;
+            ColumnCount = columnCount;
+        }
+
+        public string Label { get; }
+        public int ColumnCount { get; }
+        public Tree? Tree;
+        public bool EverSetUp;
         public Action? PendingPopulate;
+        public Action? LastPopulate;
     }
 
-    private readonly NodeState _materialNodeState = new();
-    private readonly NodeState _currentAssignmentNodeState = new();
-    private readonly NodeState _pendingNodeState = new();
+    private readonly NodeState _materialNodeState = new("material", columnCount: 3);
+    private readonly NodeState _currentAssignmentNodeState = new("currentAssignment", columnCount: 3);
+    private readonly NodeState _pendingNodeState = new("pending", columnCount: 3);
+
+    /// <summary>One Sheet Metal Preferences filter dropdown and the values it was last filled with, after the
+    /// <see cref="AnyFilterValue"/> member. A selection is mapped back through <see cref="Values"/>, never parsed
+    /// from the displayed text — that is what lets thickness be shown rounded and still compare exactly.</summary>
+    private sealed class FilterEnum<T>
+    {
+        public Enumeration? Block;
+        public IReadOnlyList<T> Values = Array.Empty<T>();
+    }
 
     private IReadOnlyList<MaterialLibraryReference> _lastPopulatedLibraries = Array.Empty<MaterialLibraryReference>();
-    private IReadOnlyList<string> _lastPopulatedStandards = Array.Empty<string>();
 
     /// <param name="bodyResolver">Maps <see cref="BodyId"/> to the live NXOpen <see cref="Body"/> and back, so
     /// the selection block can be read and written in domain terms. Shared with
@@ -160,11 +199,18 @@ public sealed class BlockAccessor
 
         _selectedBodies = TryFindBlock<SelectObject>(SelectedBodiesId);
         _libraryEnum = TryFindBlock<Enumeration>(LibraryEnumId);
-        _standardEnum = TryFindBlock<Enumeration>(StandardEnumId);
+        _sheetMetalPreferencesGroup = TryFindBlock<Group>(SmPreferencesGroupId);
+        _standardFilter.Block = TryFindBlock<Enumeration>(StandardEnumId);
+        _physicalMaterialFilter.Block = TryFindBlock<Enumeration>(SmPhysicalMaterialEnumId);
+        _thicknessFilter.Block = TryFindBlock<Enumeration>(SmThicknessEnumId);
+        _bendRadiusFilter.Block = TryFindBlock<Enumeration>(SmBendRadiusEnumId);
         _tabControl = TryFindBlock<TabControl>(TabControlId);
         _materialTree = TryFindBlock<Tree>(MaterialTreeId);
         _currentAssignmentTree = TryFindBlock<Tree>(CurrentAssignmentTreeId);
         _pendingAssignmentTree = TryFindBlock<Tree>(PendingAssignmentTreeId);
+        _materialNodeState.Tree = _materialTree;
+        _currentAssignmentNodeState.Tree = _currentAssignmentTree;
+        _pendingNodeState.Tree = _pendingAssignmentTree;
         _materialLabel = TryFindBlock<Label>(MaterialLabelId);
         _assignmentLabel = TryFindBlock<Label>(AssignmentLabelId);
         _pendingLabel = TryFindBlock<Label>(PendingLabelId);
@@ -175,23 +221,31 @@ public sealed class BlockAccessor
         if (_materialTree is not null)
         {
             Trace("Initialize: wiring materialTree callbacks");
-            _materials = new TreeBinding<Material>(_materialTree);
+            _materials = new TreeBinding<MaterialPick>(_materialTree);
             _materialTree.SetOnSelectHandler((_, node, _, selected) =>
-                Safe("materialTree.OnSelect", () => sink.OnMaterialSelected(selected ? _materials!.Resolve(node) : null)));
+                Safe("materialTree.OnSelect", () =>
+                {
+                    if (!_materials!.IsRebuilding)
+                        sink.OnMaterialSelected(selected ? _materials.Resolve(node) : null);
+                }));
             _materialTree.SetOnPreSelectHandler((_, node, _, _) =>
-                Safe("materialTree.OnPreSelect", () => sink.OnMaterialHovered(_materials!.Resolve(node))));
+                Safe("materialTree.OnPreSelect", () =>
+                {
+                    if (!_materials!.IsRebuilding)
+                        sink.OnMaterialHovered(_materials.Resolve(node));
+                }));
             _materialTree.SetToolTipTextHandler((_, node, _) =>
                 SafeFunc("materialTree.ToolTipText", () =>
                 {
-                    var material = _materials!.Resolve(node);
-                    return material is null ? string.Empty : sink.OnMaterialTooltip(material);
+                    var pick = _materials!.Resolve(node);
+                    return pick is null ? string.Empty : sink.OnMaterialTooltip(pick);
                 }, fallback: string.Empty));
             _materialTree.SetOnDefaultActionHandler((_, node, _) =>
                 Safe("materialTree.OnDefaultAction", () =>
                 {
-                    var material = _materials!.Resolve(node);
-                    if (material is not null)
-                        sink.OnMaterialDefaultAction(material);
+                    var pick = _materials!.Resolve(node);
+                    if (pick is not null)
+                        sink.OnMaterialDefaultAction(pick);
                 }));
             _materialTree.SetOnMenuHandler((tree, node, _) =>
                 Safe("materialTree.OnMenu", () => ShowMenu(tree, sink.BuildMaterialMenu(_materials!.Resolve(node)))));
@@ -207,6 +261,9 @@ public sealed class BlockAccessor
             _currentAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
                 Safe("currentAssignmentTree.OnSelect", () =>
                 {
+                    if (_assignments!.IsRebuilding)
+                        return;
+
                     sink.OnAssignmentSelected(selected ? _assignments!.Resolve(node) : null);
                     SyncHighlight(_assignments!.ResolveSelected().SelectMany(r => r.Bodies).Select(b => b.Id));
                 }));
@@ -231,6 +288,9 @@ public sealed class BlockAccessor
             _pendingAssignmentTree.SetOnSelectHandler((_, node, _, selected) =>
                 Safe("pendingAssignmentTree.OnSelect", () =>
                 {
+                    if (_pending!.IsRebuilding)
+                        return;
+
                     sink.OnPendingSelected(selected ? _pending!.Resolve(node) : null);
                     SyncHighlight(_pending!.ResolveSelected()
                         .SelectMany(r => r.Row is null ? r.Entry.Rows.Select(x => x.Body) : new[] { r.Row.Body })
@@ -294,7 +354,7 @@ public sealed class BlockAccessor
         switch (node)
         {
             case MaterialNode:
-                EnsureNodeColumns(_materialNodeState, "material", () =>
+                EnsureNodeColumns(_materialNodeState, () =>
                 {
                     _materialTree?.SetPreSelectionTimeOut(250.0);
                     InsertColumns(_materialTree,
@@ -305,7 +365,7 @@ public sealed class BlockAccessor
                 break;
 
             case CurrentAssignmentNode:
-                EnsureNodeColumns(_currentAssignmentNodeState, "currentAssignment", () =>
+                EnsureNodeColumns(_currentAssignmentNodeState, () =>
                     InsertColumns(_currentAssignmentTree,
                         (AssignmentColumn.Name, "Material / Body", 220),
                         (AssignmentColumn.Count, "Bodies / Kind", 110),
@@ -313,7 +373,7 @@ public sealed class BlockAccessor
                 break;
 
             case PendingNode:
-                EnsureNodeColumns(_pendingNodeState, "pending", () =>
+                EnsureNodeColumns(_pendingNodeState, () =>
                     InsertColumns(_pendingAssignmentTree,
                         (PendingColumn.Name, "Material / Body", 220),
                         (PendingColumn.Kind, "Kind", 90),
@@ -327,40 +387,92 @@ public sealed class BlockAccessor
     }
 
 
-    private void EnsureNodeColumns(NodeState state, string label, Action setupColumns)
+    private void EnsureNodeColumns(NodeState state, Action setupColumns)
     {
-        if (!state.ColumnsReady)
+        if (HasLiveColumns(state))
         {
-            Trace($"SetUpColumns: setting up {label}");
-            setupColumns();
-            state.ColumnsReady = true;
+            Trace($"SetUpColumns: {state.Label} already set up");
         }
         else
         {
-            Trace($"SetUpColumns: {label} already set up");
+            // Set up before means NX rebuilt this tree's control and dropped its rows with it, so the latest
+            // data has to go back in even though nothing new was asked for.
+            if (state.EverSetUp)
+            {
+                Trace($"SetUpColumns: {state.Label} lost its columns (control recreated) — rebuilding");
+                state.PendingPopulate ??= state.LastPopulate;
+            }
+            else
+            {
+                Trace($"SetUpColumns: setting up {state.Label}");
+            }
+
+            setupColumns();
+            state.EverSetUp = true;
         }
 
-        // The page just became current (this method only runs for _explorer.CurrentNode), so it's now safe
-        // to flush anything queued while the page was off-screen — regardless of whether this is the first
-        // time its columns were set up.
+        // The page just became current (this method only runs for the active page), so it's now safe to flush
+        // anything queued while the page was off-screen.
         if (state.PendingPopulate is { } populate)
         {
-            Trace($"SetUpColumns: flushing deferred populate for {label}");
+            Trace($"SetUpColumns: flushing deferred populate for {state.Label}");
             state.PendingPopulate = null;
-            populate();
+            TryPopulate(state, populate);
+        }
+    }
+
+    /// <summary>Whether the tree's native control exists right now with its columns in it. Asked of NX every time:
+    /// see <see cref="NodeState"/> for why this cannot be remembered.</summary>
+    private bool HasLiveColumns(NodeState state)
+    {
+        if (state.Tree is null)
+            return false;
+
+        try
+        {
+            return state.Tree.NumberOfColumns >= state.ColumnCount;
+        }
+        catch (NXException ex)
+        {
+            Trace($"HasLiveColumns: {state.Label} not available (NX {ex.ErrorCode})");
+            return false;
         }
     }
 
     // A tree's native controls only exist while its tab page is the current one (see the comment at
-    // MaterialNode/CurrentAssignmentNode/PendingNode above); Tree.Redraw on an off-screen page throws
-    // NXException. state.ColumnsReady alone only proves the page was current at some point, not that it
-    // still is, so both conditions are required before populating immediately.
+    // MaterialNode/CurrentAssignmentNode/PendingNode above), and Tree.Redraw on a control that is not there throws
+    // NXException. So a populate only runs now when the page is current AND the control has its columns; otherwise
+    // it waits for the next SetUpColumns.
     private void RunOrDefer(NodeState state, int nodeId, Action populate)
     {
-        if (state.ColumnsReady && _tabControl?.ActivePage == nodeId)
-            populate();
+        state.LastPopulate = populate;
+
+        var active = _tabControl?.ActivePage;
+        if (active == nodeId && HasLiveColumns(state))
+        {
+            TryPopulate(state, populate);
+        }
         else
+        {
+            Trace($"RunOrDefer: {state.Label} deferred (active page {active})");
             state.PendingPopulate = populate;
+        }
+    }
+
+    /// <summary>Runs <paramref name="populate"/>, and if NX refuses the tree after all, keeps it for the next
+    /// <see cref="SetUpColumns"/> instead of letting the exception reach the user — the tree recovers on the next tab
+    /// switch or dialog show rather than staying broken.</summary>
+    private void TryPopulate(NodeState state, Action populate)
+    {
+        try
+        {
+            populate();
+        }
+        catch (TreeUnavailableException ex)
+        {
+            Trace($"TryPopulate: {state.Label} rebuild refused, deferred — {ex.Message}");
+            state.PendingPopulate = populate;
+        }
     }
 
     private void InsertColumns(Tree? tree, params (int Id, string Title, int Width)[] columns)
@@ -373,9 +485,17 @@ public sealed class BlockAccessor
 
         foreach (var (id, title, width) in columns)
         {
-            Trace($"InsertColumns: column {id} ('{title}')");
-            tree.InsertColumn(id, title, width);
-            tree.SetColumnResizePolicy(id, Tree.ColumnResizePolicy.ConstantWidth);
+            // Per column, so a control that kept some of its columns still gets the rest.
+            try
+            {
+                Trace($"InsertColumns: column {id} ('{title}')");
+                tree.InsertColumn(id, title, width);
+                tree.SetColumnResizePolicy(id, Tree.ColumnResizePolicy.ConstantWidth);
+            }
+            catch (NXException ex)
+            {
+                Trace($"InsertColumns: column {id} ('{title}') failed: NX {ex.ErrorCode}: {ex.Message}");
+            }
         }
     }
 
@@ -383,7 +503,8 @@ public sealed class BlockAccessor
 
     // ---- Library enumeration ----
 
-    public void PopulateLibraryEnum(IReadOnlyList<MaterialLibraryReference> libraries)
+    /// <param name="select">The library to leave selected, when it is still listed; otherwise the first.</param>
+    public void PopulateLibraryEnum(IReadOnlyList<MaterialLibraryReference> libraries, MaterialLibraryId? select = null)
     {
         _lastPopulatedLibraries = libraries;
         if (_libraryEnum is null)
@@ -394,7 +515,10 @@ public sealed class BlockAccessor
         {
             properties.SetEnumMembers("Value", libraries.Select(l => l.DisplayName).ToArray());
             if (libraries.Count > 0)
-                properties.SetEnum("Value", 0);
+            {
+                var index = libraries.ToList().FindIndex(l => select is { } id && l.Id == id);
+                properties.SetEnum("Value", Math.Max(index, 0));
+            }
         }
         finally
         {
@@ -405,22 +529,59 @@ public sealed class BlockAccessor
     public MaterialLibraryId? GetSelectedLibraryId() =>
         SelectedIndex(_libraryEnum, _lastPopulatedLibraries.Count) is { } index ? _lastPopulatedLibraries[index].Id : null;
 
-    // ---- Sheet metal Standard enumeration ----
+    // ---- Sheet Metal Preferences filters ----
 
-    /// <summary>Fills the Standard picker and selects the first Standard. Visibility is left to
-    /// <see cref="SetStandardVisible"/>: the .dlx hides the block until a sheet metal library is chosen.</summary>
-    public void PopulateStandardEnum(IReadOnlyList<string> standards)
+    /// <summary>Shows or hides the whole Sheet Metal Preferences group, which only means anything for a sheet metal
+    /// library.</summary>
+    public void SetSheetMetalPreferencesVisible(bool visible)
     {
-        _lastPopulatedStandards = standards;
-        if (_standardEnum is null)
+        if (_sheetMetalPreferencesGroup is not null)
+            _sheetMetalPreferencesGroup.Show = visible;
+    }
+
+    /// <summary>Refills the four filter dropdowns from <paramref name="rows"/>, each with the options
+    /// <paramref name="current"/> leaves it (see <see cref="SheetMetalRowFilter"/>), keeping each one's current value
+    /// selected. Read the filter back with <see cref="GetSheetMetalFilter"/> afterwards: a value no longer offered
+    /// falls back to <see cref="AnyFilterValue"/>.</summary>
+    public void PopulateSheetMetalFilters(IReadOnlyList<SheetMetalMaterialRow> rows, SheetMetalRowFilter current)
+    {
+        PopulateFilter(_standardFilter, current.StandardOptions(rows), current.Standard, v => v, SameText);
+        PopulateFilter(_physicalMaterialFilter, current.PhysicalMaterialOptions(rows), current.PhysicalMaterialName, v => v, SameText);
+        PopulateFilter(_thicknessFilter, current.ThicknessOptions(rows), current.Thickness,
+            SheetMetalRowFilter.FormatThickness, (a, b) => b is { } t && ThicknessMatchRule.Matches(a, t));
+        PopulateFilter(_bendRadiusFilter, current.BendRadiusOptions(rows), current.BendRadius, v => v, SameText);
+    }
+
+    public SheetMetalRowFilter GetSheetMetalFilter() =>
+        new(SelectedFilterValue(_standardFilter),
+            SelectedFilterValue(_physicalMaterialFilter),
+            SelectedFilterIndex(_thicknessFilter) is { } i ? _thicknessFilter.Values[i] : null,
+            SelectedFilterValue(_bendRadiusFilter));
+
+    private static bool SameText(string a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    private static void PopulateFilter<T, TCurrent>(
+        FilterEnum<T> filter, IReadOnlyList<T> values, TCurrent current, Func<T, string> display, Func<T, TCurrent, bool> matches)
+    {
+        filter.Values = values;
+        if (filter.Block is null)
             return;
 
-        var properties = _standardEnum.GetProperties();
+        var selected = 0;
+        for (var i = 0; i < values.Count; i++)
+        {
+            if (matches(values[i], current))
+            {
+                selected = i + 1;
+                break;
+            }
+        }
+
+        var properties = filter.Block.GetProperties();
         try
         {
-            properties.SetEnumMembers("Value", standards.ToArray());
-            if (standards.Count > 0)
-                properties.SetEnum("Value", 0);
+            properties.SetEnumMembers("Value", new[] { AnyFilterValue }.Concat(values.Select(display)).ToArray());
+            properties.SetEnum("Value", selected);
         }
         finally
         {
@@ -428,14 +589,13 @@ public sealed class BlockAccessor
         }
     }
 
-    public string? GetSelectedStandard() =>
-        SelectedIndex(_standardEnum, _lastPopulatedStandards.Count) is { } index ? _lastPopulatedStandards[index] : null;
+    /// <summary>The index into <see cref="FilterEnum{T}.Values"/> of the selected member, or null for
+    /// <see cref="AnyFilterValue"/>.</summary>
+    private static int? SelectedFilterIndex<T>(FilterEnum<T> filter) =>
+        SelectedIndex(filter.Block, filter.Values.Count + 1) is { } index and > 0 ? index - 1 : null;
 
-    public void SetStandardVisible(bool visible)
-    {
-        if (_standardEnum is not null)
-            _standardEnum.Show = visible;
-    }
+    private static string? SelectedFilterValue(FilterEnum<string> filter) =>
+        SelectedFilterIndex(filter) is { } i ? filter.Values[i] : null;
 
     /// <summary>The selected index of <paramref name="enumeration"/>, or null when nothing valid is selected among the
     /// <paramref name="populatedCount"/> members last populated.</summary>
@@ -458,7 +618,11 @@ public sealed class BlockAccessor
 
     // ---- Material tree ----
 
-    public void PopulateMaterialTree(IReadOnlyList<MaterialCategoryNode> roots)
+    /// <param name="sheetMetalRowsFor">For a sheet metal library: the standards file rows to list under each physical
+    /// material — the Sheet Metal Preferences materials the user actually picks. Null for any other library.</param>
+    public void PopulateMaterialTree(
+        IReadOnlyList<MaterialCategoryNode> roots,
+        Func<Material, IReadOnlyList<SheetMetalMaterialRow>>? sheetMetalRowsFor = null)
     {
         if (_materials is null)
             return;
@@ -467,28 +631,50 @@ public sealed class BlockAccessor
             _materials.Rebuild(() =>
             {
                 foreach (var root in roots)
-                    AddCategory(root, parent: null);
+                    AddCategory(root, parent: null, sheetMetalRowsFor);
             }));
     }
 
-    private void AddCategory(MaterialCategoryNode category, Node? parent)
+    private void AddCategory(
+        MaterialCategoryNode category, Node? parent, Func<Material, IReadOnlyList<SheetMetalMaterialRow>>? sheetMetalRowsFor)
     {
         // Category rows map to no domain value on purpose: they are structure, and selecting one should not
         // look like selecting a material.
         var node = _materials!.Add(category.DisplayName, value: null, parent);
 
         foreach (var child in category.Children)
-            AddCategory(child, node);
+            AddCategory(child, node, sheetMetalRowsFor);
 
         foreach (var material in category.Materials)
         {
-            var materialNode = _materials.Add(material.Name, material, node);
+            var materialNode = _materials.Add(material.Name, new MaterialPick(material), node);
             materialNode.SetColumnDisplayText(MaterialColumn.Detail, material.Description ?? string.Empty);
             materialNode.SetColumnDisplayText(MaterialColumn.Density, DensityText(material));
+
+            if (sheetMetalRowsFor is null)
+                continue;
+
+            foreach (var row in sheetMetalRowsFor(material))
+            {
+                var rowNode = _materials.Add(row.Name, new MaterialPick(material, row), materialNode);
+                rowNode.SetColumnDisplayText(MaterialColumn.Detail, SheetMetalRowText(row));
+                rowNode.SetColumnDisplayText(MaterialColumn.Density, DensityText(material));
+            }
         }
     }
 
-    public Material? GetSelectedMaterial() => _materials?.ResolveSelected().FirstOrDefault();
+    /// <summary>Standard, grade, thickness and bend radius — the columns the user filters on, so a row can be told
+    /// from its siblings at a glance.</summary>
+    internal static string SheetMetalRowText(SheetMetalMaterialRow row)
+    {
+        var parts = new List<string> { row.Standard, row.Grade, $"THK {SheetMetalRowFilter.FormatThickness(row.Thickness)}" };
+        if (!string.IsNullOrWhiteSpace(row.BendRadius))
+            parts.Add($"BR {row.BendRadius}");
+
+        return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
+    }
+
+    public MaterialPick? GetSelectedMaterialPick() => _materials?.ResolveSelected().FirstOrDefault();
     private static string DensityText(Material material)
     {
         var density = material.Properties
@@ -504,11 +690,11 @@ public sealed class BlockAccessor
 
     // ---- Material labels, one per tab page ----
 
-    public void SetMaterialLabel(Material? material) => SetLabelText(_materialLabel, material?.Name);
+    public void SetMaterialLabel(MaterialPick? pick) => SetLabelText(_materialLabel, pick?.DisplayName);
 
     public void SetAssignmentLabel(AssignmentRowRef? row) => SetLabelText(_assignmentLabel, row?.Row.MaterialLabel);
 
-    public void SetPendingLabel(PendingRowRef? row) => SetLabelText(_pendingLabel, row?.Entry.Material.Name);
+    public void SetPendingLabel(PendingRowRef? row) => SetLabelText(_pendingLabel, row?.Entry.DisplayName);
 
     private static void SetLabelText(Label? label, string? text)
     {
@@ -573,7 +759,7 @@ public sealed class BlockAccessor
             {
                 foreach (var entry in entries)
                 {
-                    var node = _pending.Add(entry.Material.Name, new PendingRowRef(entry, null), parent: null);
+                    var node = _pending.Add(entry.DisplayName, new PendingRowRef(entry, null), parent: null);
                     node.SetColumnDisplayText(PendingColumn.Kind, entry.Rows.Count.ToString());
 
                     foreach (var row in entry.Rows)

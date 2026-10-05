@@ -24,20 +24,40 @@ public sealed class TreeBinding<T> where T : class
 
     public TreeBinding(Tree tree) => _tree = tree;
 
+    /// <summary>True while <see cref="Rebuild"/> runs. NX fires the tree's select handlers as rows are deleted,
+    /// and those handlers must not query a tree that is half torn down.</summary>
+    public bool IsRebuilding { get; private set; }
+
     /// <summary>Clears the tree and repopulates it via <paramref name="populate"/>, with the whole rebuild
     /// frozen behind Redraw(false)/Redraw(true) so NX paints once instead of once per node. Redraw is
     /// restored in a finally — leaving a tree frozen after an exception makes the dialog look hung.</summary>
+    /// <exception cref="TreeUnavailableException">NX refused the rebuild — typically the tree's native control does
+    /// not exist right now (its tab page is not built, or NX recreated the dialog's controls). The bindings are
+    /// dropped, so no stale row can resolve; the caller re-runs the rebuild once the control is back.</exception>
     public void Rebuild(Action populate)
     {
-        _tree.Redraw(false);
+        IsRebuilding = true;
         try
         {
-            Clear();
-            populate();
+            _tree.Redraw(false);
+            try
+            {
+                Clear();
+                populate();
+            }
+            finally
+            {
+                _tree.Redraw(true);
+            }
+        }
+        catch (NXException ex)
+        {
+            _byNodeTag.Clear();
+            throw new TreeUnavailableException(ex);
         }
         finally
         {
-            _tree.Redraw(true);
+            IsRebuilding = false;
         }
     }
 
@@ -62,6 +82,9 @@ public sealed class TreeBinding<T> where T : class
 
     public IReadOnlyList<T> ResolveSelected()
     {
+        if (IsRebuilding)
+            return Array.Empty<T>();
+
         var selected = _tree.GetSelectedNodes();
         if (selected is null)
             return Array.Empty<T>();
@@ -95,5 +118,15 @@ public sealed class TreeBinding<T> where T : class
             _tree.DeleteNode(root);
 
         _byNodeTag.Clear();
+    }
+}
+
+/// <summary>A tree could not be rebuilt because NX would not let it be touched. Recoverable: see
+/// <see cref="TreeBinding{T}.Rebuild"/>.</summary>
+public sealed class TreeUnavailableException : Exception
+{
+    public TreeUnavailableException(NXException inner)
+        : base($"The tree could not be rebuilt: NX {inner.ErrorCode}: {inner.Message}", inner)
+    {
     }
 }

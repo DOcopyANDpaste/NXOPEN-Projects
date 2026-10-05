@@ -1,5 +1,3 @@
-using BANxOpen.Foundation.Contracts.Materials;
-
 namespace BANxOpen.Ui.MaterialAssignment;
 
 /// <summary>What <see cref="BlockAccessor"/> calls back into when the user touches a tree. Implemented by
@@ -15,18 +13,19 @@ namespace BANxOpen.Ui.MaterialAssignment;
 /// not a duplicate of it.</summary>
 public interface ITreeInteractionSink
 {
-    void OnMaterialSelected(Material? material);
+    // Material rows are MaterialPicks: a physical material, or a sheet metal standards row under one.
+    void OnMaterialSelected(MaterialPick? pick);
 
     /// <summary>Fires on hover (Tree.SetOnPreSelectHandler), which is what drives the thumbnail preview.</summary>
-    void OnMaterialHovered(Material? material);
+    void OnMaterialHovered(MaterialPick? pick);
 
-    string OnMaterialTooltip(Material material);
+    string OnMaterialTooltip(MaterialPick pick);
 
     /// <summary>Double-click on a material row.</summary>
-    void OnMaterialDefaultAction(Material material);
+    void OnMaterialDefaultAction(MaterialPick pick);
 
-    IReadOnlyList<TreeMenuItem> BuildMaterialMenu(Material? clicked);
-    void OnMaterialMenuCommand(int menuItemId, IReadOnlyList<Material> targets);
+    IReadOnlyList<TreeMenuItem> BuildMaterialMenu(MaterialPick? clicked);
+    void OnMaterialMenuCommand(int menuItemId, IReadOnlyList<MaterialPick> targets);
 
     void OnAssignmentSelected(AssignmentRowRef? row);
 
