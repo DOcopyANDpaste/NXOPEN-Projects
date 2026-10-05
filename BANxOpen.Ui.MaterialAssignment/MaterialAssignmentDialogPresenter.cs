@@ -57,8 +57,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     private readonly BlockAccessor _blocks;
     private readonly IPartMaterialService _partMaterialService;
     private readonly IMaterialLibraryRepository _libraryRepository;
-    private readonly IMaterialLibraryLoader _libraryLoader;
-    private readonly IMaterialCategoryTreeBuilder _categoryTreeBuilder;
+    private readonly CachingMaterialLibraryLoader _libraryLoader;
+    private readonly MaterialCategoryTreeBuilder _categoryTreeBuilder;
     private readonly IMaterialAssignmentPlanner _planner;
     private readonly IAssignmentPlanFinalizer _finalizer;
     private readonly SheetMetalStandardSelection _standardSelection;
@@ -92,8 +92,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         BlockAccessor blocks,
         IPartMaterialService partMaterialService,
         IMaterialLibraryRepository libraryRepository,
-        IMaterialLibraryLoader libraryLoader,
-        IMaterialCategoryTreeBuilder categoryTreeBuilder,
+        CachingMaterialLibraryLoader libraryLoader,
+        MaterialCategoryTreeBuilder categoryTreeBuilder,
         IMaterialAssignmentPlanner planner,
         IAssignmentPlanFinalizer finalizer,
         SheetMetalStandardSelection standardSelection,
