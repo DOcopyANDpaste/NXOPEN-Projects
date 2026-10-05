@@ -548,7 +548,7 @@ public sealed class BlockAccessor
         PopulateFilter(_standardFilter, current.StandardOptions(rows), current.Standard, v => v, SameText);
         PopulateFilter(_physicalMaterialFilter, current.PhysicalMaterialOptions(rows), current.PhysicalMaterialName, v => v, SameText);
         PopulateFilter(_thicknessFilter, current.ThicknessOptions(rows), current.Thickness,
-            SheetMetalRowFilter.FormatThickness, (a, b) => b is { } t && ThicknessMatchRule.Matches(a, t));
+            ThicknessMatchRule.Format, (a, b) => b is { } t && ThicknessMatchRule.Matches(a, t));
         PopulateFilter(_bendRadiusFilter, current.BendRadiusOptions(rows), current.BendRadius, v => v, SameText);
     }
 
@@ -667,7 +667,7 @@ public sealed class BlockAccessor
     /// from its siblings at a glance.</summary>
     internal static string SheetMetalRowText(SheetMetalMaterialRow row)
     {
-        var parts = new List<string> { row.Standard, row.Grade, $"THK {SheetMetalRowFilter.FormatThickness(row.Thickness)}" };
+        var parts = new List<string> { row.Standard, row.Grade, $"THK {ThicknessMatchRule.Format(row.Thickness)}" };
         if (!string.IsNullOrWhiteSpace(row.BendRadius))
             parts.Add($"BR {row.BendRadius}");
 
