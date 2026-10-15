@@ -16,6 +16,8 @@ using Group = NXOpen.BlockStyler.Group;
 using BANxOpen.Foundation.Contracts.Bodies;
 using BANxOpen.SheetMetal.Beads.Rules;
 using BANxOpen.SheetMetal.Materials;
+using BANxOpen.SheetMetal.Common;
+using BANxOpen.Ui.MaterialAssignment.SheetMetalSupport;
 
 namespace BANxOpen.Ui.MaterialAssignment;
 
@@ -91,6 +93,9 @@ public sealed class BlockAccessor
         public const int Name = 0;
         public const int Count = 1;
         public const int DisplayMaterial = 2;
+
+        // Only inserted in the NX Sheet Metal application — see ShowSheetMetalGradeColumn.
+        public const int SheetMetalGrade = 3;
     }
 
     private static class PendingColumn
@@ -99,10 +104,6 @@ public sealed class BlockAccessor
         public const int Kind = 1;
         public const int Status = 2;
     }
-
-    // NX color indices used to code pending rows. 186 reads as red and 36 as amber in the default palette.
-    private const int BlockedColor = 186;
-    private const int NeedsConfirmationColor = 36;
 
     private readonly BlockDialog _dialog;
     private readonly BodyResolver _bodyResolver;
@@ -154,7 +155,9 @@ public sealed class BlockAccessor
         }
 
         public string Label { get; }
-        public int ColumnCount { get; }
+
+        // Settable because the current-assignment tree gains the SheetMetal Grade column in the Sheet Metal application.
+        public int ColumnCount { get; set; }
         public Tree? Tree;
         public bool EverSetUp;
         public Action? PendingPopulate;
@@ -365,11 +368,16 @@ public sealed class BlockAccessor
                 break;
 
             case CurrentAssignmentNode:
+                _currentAssignmentNodeState.ColumnCount = ShowSheetMetalGradeColumn ? 4 : 3;
                 EnsureNodeColumns(_currentAssignmentNodeState, () =>
+                {
                     InsertColumns(_currentAssignmentTree,
                         (AssignmentColumn.Name, "Material / Body", 220),
                         (AssignmentColumn.Count, "Bodies / Kind", 110),
-                        (AssignmentColumn.DisplayMaterial, "Display material", 140)));
+                        (AssignmentColumn.DisplayMaterial, "Display material", 140));
+                    if (ShowSheetMetalGradeColumn)
+                        InsertColumns(_currentAssignmentTree, (AssignmentColumn.SheetMetalGrade, "SheetMetal Grade", 150));
+                });
                 break;
 
             case PendingNode:
@@ -657,21 +665,10 @@ public sealed class BlockAccessor
             foreach (var row in sheetMetalRowsFor(material))
             {
                 var rowNode = _materials.Add(row.Name, new MaterialPick(material, row), materialNode);
-                rowNode.SetColumnDisplayText(MaterialColumn.Detail, SheetMetalRowText(row));
+                rowNode.SetColumnDisplayText(MaterialColumn.Detail, row.Describe());
                 rowNode.SetColumnDisplayText(MaterialColumn.Density, DensityText(material));
             }
         }
-    }
-
-    /// <summary>Standard, grade, thickness and bend radius — the columns the user filters on, so a row can be told
-    /// from its siblings at a glance.</summary>
-    internal static string SheetMetalRowText(SheetMetalMaterialRow row)
-    {
-        var parts = new List<string> { row.Standard, row.Grade, $"THK {ThicknessMatchRule.Format(row.Thickness)}" };
-        if (!string.IsNullOrWhiteSpace(row.BendRadius))
-            parts.Add($"BR {row.BendRadius}");
-
-        return string.Join(" · ", parts.Where(p => !string.IsNullOrWhiteSpace(p)));
     }
 
     public MaterialPick? GetSelectedMaterialPick() => _materials?.ResolveSelected().FirstOrDefault();
@@ -726,12 +723,17 @@ public sealed class BlockAccessor
                 {
                     var node = _assignments.Add(group.Row.MaterialLabel, group, parent: null);
                     node.SetColumnDisplayText(AssignmentColumn.Count, group.Row.BodyCount.ToString());
+                    if (ShowSheetMetalGradeColumn)
+                        node.SetColumnDisplayText(AssignmentColumn.SheetMetalGrade, SheetMetalGradeText.ForMaterial(group.Row.MaterialLabel, PartPreference));
 
                     foreach (var body in group.Bodies)
                     {
                         var bodyNode = _assignments.Add(body.Name, AssignmentRowRef.ForBody(group.Row, body), node);
                         bodyNode.SetColumnDisplayText(AssignmentColumn.Count, body.Kind.ToString());
                         bodyNode.SetColumnDisplayText(AssignmentColumn.DisplayMaterial, DisplayMaterialText(body));
+                        if (ShowSheetMetalGradeColumn)
+                            bodyNode.SetColumnDisplayText(AssignmentColumn.SheetMetalGrade, SheetMetalGradeText.ForBody(
+                                PreferenceChecks.TryGetValue(body.Id, out var check) ? check : null, PartPreference));
                     }
                 }
             }));
@@ -741,6 +743,19 @@ public sealed class BlockAccessor
     /// filled without this class re-querying the part.</summary>
     public IReadOnlyDictionary<BodyId, BodyMaterialAssignment> CurrentAssignments { get; set; } =
         new Dictionary<BodyId, BodyMaterialAssignment>();
+
+    /// <summary>Whether the current-assignment tree has the SheetMetal Grade column. Set by the presenter before the
+    /// first <see cref="SetUpColumns"/> — true in the NX Sheet Metal application.</summary>
+    public bool ShowSheetMetalGradeColumn { get; set; }
+
+    /// <summary>The part's Sheet Metal Preferences, for the SheetMetal Grade column. Set by the presenter alongside
+    /// <see cref="CurrentAssignments"/>.</summary>
+    public SheetMetalPartPreference? PartPreference { get; set; }
+
+    /// <summary>How each sheet metal body stands against <see cref="PartPreference"/>, for the SheetMetal Grade column.
+    /// Set by the presenter alongside it.</summary>
+    public IReadOnlyDictionary<BodyId, SheetMetalPreferenceCheckResult> PreferenceChecks { get; set; } =
+        new Dictionary<BodyId, SheetMetalPreferenceCheckResult>();
 
     private string DisplayMaterialText(BodyInfo body) =>
         CurrentAssignments.TryGetValue(body.Id, out var assignment)
@@ -767,27 +782,16 @@ public sealed class BlockAccessor
                         var bodyNode = _pending.Add(row.Body.Name, new PendingRowRef(entry, row), node);
                         bodyNode.SetColumnDisplayText(PendingColumn.Kind, row.Body.Kind.ToString());
                         bodyNode.SetColumnDisplayText(PendingColumn.Status, StatusText(row));
-
-                        if (row.Status == PendingBodyStatus.Blocked)
-                            bodyNode.ForegroundColor = BlockedColor;
-                        else if (row.Status == PendingBodyStatus.NeedsConfirmation)
-                            bodyNode.ForegroundColor = NeedsConfirmationColor;
                     }
                 }
             }));
     }
 
-    private static string StatusText(PendingBodyRow row)
-    {
-        var label = row.Status switch
-        {
-            PendingBodyStatus.Blocked => "Blocked",
-            PendingBodyStatus.NeedsConfirmation => "Needs confirmation",
-            _ => "OK",
-        };
-
-        return string.IsNullOrWhiteSpace(row.Message) ? label : $"{label} — {row.Message}";
-    }
+    /// <summary>Every body in the pending tree has been applied as a preview — blocked and declined bodies are
+    /// reported when the material is assigned and never listed — so the status only adds a rule's warning or
+    /// confirmation note.</summary>
+    private static string StatusText(PendingBodyRow row) =>
+        string.IsNullOrWhiteSpace(row.Message) ? "Previewed" : $"Previewed — {row.Message}";
 
     // ---- Tree selection highlight ----
 

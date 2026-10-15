@@ -8,7 +8,7 @@ using BANxOpen.SheetMetal.Materials;
 
 namespace BANxOpen.Ui.MaterialAssignment;
 
-/// <summary>What the planner decided about one body in a staged assignment, flattened to the single value
+/// <summary>What the planner decided about one body in a pending assignment, flattened to the single value
 /// the Status column shows.</summary>
 public enum PendingBodyStatus
 {
@@ -19,15 +19,15 @@ public enum PendingBodyStatus
 
 public sealed record PendingBodyRow(BodyInfo Body, PendingBodyStatus Status, string? Message);
 
-/// <summary>One staged "assign this material to these bodies" request, held between the user picking it off
-/// the material tree and OK/Apply committing it. Presentation-only, like <see cref="MaterialUsageRow"/> —
-/// it carries the Core types the commit needs (<see cref="Input"/> and <see cref="Plan"/> go straight to
-/// <c>IAssignmentPlanFinalizer.Finalize</c>) plus the per-body rows the tree renders, so nothing has to be
-/// re-planned at commit time.
+/// <summary>One previewed "assign this material to these bodies" request: already applied to the part on top of
+/// the dialog's preview undo mark, and kept or reverted as a whole by OK/Apply or Cancel. Presentation-only, like
+/// <see cref="MaterialUsageRow"/> — it carries the Core types a re-apply needs (<see cref="Input"/> and
+/// <see cref="Plan"/> go straight to <c>IAssignmentPlanFinalizer.Finalize</c>) plus the per-body rows the pending
+/// tree renders.
 ///
-/// The plan is computed once, at staging time. That is deliberate: the user sees the rule outcomes for the
-/// state the part was in when they staged the entry. <c>OnRefreshClicked</c> re-plans everything pending so
-/// a stale entry cannot be committed against a part that has moved on underneath it.</summary>
+/// Only bodies that were actually applied are kept in an entry; blocked and declined bodies are reported to the user
+/// when the material is assigned and left out. When the preview is rebuilt (a pending body removed or reclaimed), the
+/// entry is re-planned and re-applied with the confirmations in <see cref="ConfirmedBodyIds"/>.</summary>
 public sealed record PendingAssignmentEntry(
     Material Material,
     MaterialAssignmentPlanningInput Input,
@@ -38,6 +38,10 @@ public sealed record PendingAssignmentEntry(
     /// Metal Preferences are set to when the entry's sheet metal bodies are assigned. Null when a plain physical
     /// material was picked. Carried across re-plans.</summary>
     public SheetMetalMaterialRow? SheetMetalRow { get; init; }
+
+    /// <summary>The bodies whose rule asked for confirmation and the user said yes, so a rebuilt preview does not ask
+    /// again. Carried across re-plans.</summary>
+    public IReadOnlyCollection<BodyId> ConfirmedBodyIds { get; init; } = Array.Empty<BodyId>();
 
     /// <summary>How the entry is named to the user: the material, with the picked row when there is one.</summary>
     public string DisplayName => SheetMetalRow is { } row ? $"{Material.Name} [{row.Name}]" : Material.Name;

@@ -16,7 +16,7 @@ public sealed record AssignmentRowRef(MaterialUsageRow Row, IReadOnlyList<BodyIn
         new(row, new[] { body }, body);
 }
 
-/// <summary>The same idea for <c>PendingAssignmentTree</c>: a root row is a whole staged entry, a child row
+/// <summary>The same idea for <c>PendingAssignmentTree</c>: a root row is a whole pending entry, a child row
 /// is one body within it.</summary>
 public sealed record PendingRowRef(PendingAssignmentEntry Entry, PendingBodyRow? Row);
 
