@@ -1076,9 +1076,9 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             return;
         }
 
-        _context.Log.Info($"TRACE ShowProperties: opening property window for '{material.Name}'.");
+        _context.Log.Debug($"ShowProperties: opening property window for '{material.Name}'.");
         _propertyWindow.Show(material);
-        _context.Log.Info("TRACE ShowProperties: property window returned control to the main dialog.");
+        _context.Log.Debug("ShowProperties: property window returned control to the main dialog.");
     }
 
     // ---- State refresh ----
