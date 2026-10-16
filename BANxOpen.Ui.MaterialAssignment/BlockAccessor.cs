@@ -73,11 +73,11 @@ public sealed class BlockAccessor
 
     /// <summary>What a material label shows when its tree has nothing selected. The blocks are designed
     /// with the placeholder text "XX_MaterialName", which would otherwise sit there looking like data.</summary>
-    private const string NoMaterialLabel = "(no material selected)";
+    private const string NoMaterialLabel = UiText.Labels.NoMaterialSelected;
 
     /// <summary>The first member of every Sheet Metal Preferences filter dropdown. An enumeration cannot be left with
     /// nothing selected, so "no filter" is a member of its own.</summary>
-    private const string AnyFilterValue = "(Any)";
+    private const string AnyFilterValue = UiText.Labels.AnyFilter;
 
     // Column ids. Both trees in the .dlx have ShowHeader/ShowMultipleColumns true but declare no columns at
     // design time, so these are created at runtime in SetUpColumns.
@@ -341,9 +341,7 @@ public sealed class BlockAccessor
     private void ReportCallbackException(string what, Exception ex)
     {
         _logWarning?.Invoke($"EXCEPTION in {what}: {ex}");
-        NxMessageBoxHelper.ShowError(
-            $"An error occurred handling '{what}':{Environment.NewLine}{ex.Message}{Environment.NewLine}{Environment.NewLine}" +
-            "Full details were written to the Listing Window.");
+        ShowError(NxDialogText.Default.HandlerFailed(what, ex.Message));
     }
 
     public void SetUpColumns()
@@ -364,9 +362,9 @@ public sealed class BlockAccessor
                 {
                     _materialTree?.SetPreSelectionTimeOut(250.0);
                     InsertColumns(_materialTree,
-                        (MaterialColumn.Name, "Material", 220),
-                        (MaterialColumn.Detail, "Description", 160),
-                        (MaterialColumn.Density, "Density", 90));
+                        (MaterialColumn.Name, UiText.Columns.Material, 220),
+                        (MaterialColumn.Detail, UiText.Columns.Description, 160),
+                        (MaterialColumn.Density, UiText.Columns.Density, 90));
                 });
                 break;
 
@@ -375,21 +373,21 @@ public sealed class BlockAccessor
                 EnsureNodeColumns(_currentAssignmentNodeState, () =>
                 {
                     InsertColumns(_currentAssignmentTree,
-                        (AssignmentColumn.Name, "Material / Body", 220),
-                        (AssignmentColumn.Count, "Bodies / Kind", 110),
-                        (AssignmentColumn.DisplayMaterial, "Display material", 140),
-                        (AssignmentColumn.Pending, "Pending", 200));
+                        (AssignmentColumn.Name, UiText.Columns.MaterialOrBody, 220),
+                        (AssignmentColumn.Count, UiText.Columns.BodiesOrKind, 110),
+                        (AssignmentColumn.DisplayMaterial, UiText.Columns.DisplayMaterial, 140),
+                        (AssignmentColumn.Pending, UiText.Columns.Pending, 200));
                     if (ShowSheetMetalGradeColumn)
-                        InsertColumns(_currentAssignmentTree, (AssignmentColumn.SheetMetalGrade, "SheetMetal Grade", 150));
+                        InsertColumns(_currentAssignmentTree, (AssignmentColumn.SheetMetalGrade, UiText.Columns.SheetMetalGrade, 150));
                 });
                 break;
 
             case PendingNode:
                 EnsureNodeColumns(_pendingNodeState, () =>
                     InsertColumns(_pendingAssignmentTree,
-                        (PendingColumn.Name, "Material / Body", 220),
-                        (PendingColumn.Kind, "Kind", 90),
-                        (PendingColumn.Status, "Status", 260)));
+                        (PendingColumn.Name, UiText.Columns.MaterialOrBody, 220),
+                        (PendingColumn.Kind, UiText.Columns.Kind, 90),
+                        (PendingColumn.Status, UiText.Columns.Status, 260)));
                 break;
 
             default:
@@ -729,7 +727,7 @@ public sealed class BlockAccessor
                     node.SetColumnDisplayText(AssignmentColumn.Count, group.Row.BodyCount.ToString());
                     var pendingCount = group.Bodies.Count(b => PendingByBody.ContainsKey(b.Id));
                     if (pendingCount > 0)
-                        node.SetColumnDisplayText(AssignmentColumn.Pending, $"{pendingCount} pending");
+                        node.SetColumnDisplayText(AssignmentColumn.Pending, UiText.Status.GroupPendingCount(pendingCount));
                     if (ShowSheetMetalGradeColumn)
                         node.SetColumnDisplayText(AssignmentColumn.SheetMetalGrade, SheetMetalGradeText.ForMaterial(group.Row.MaterialLabel, PartPreference));
 
@@ -775,13 +773,16 @@ public sealed class BlockAccessor
     private static string PendingFlagText(PendingRowRef pending)
     {
         var row = pending.Row!;
-        var suffix = row.Status == PendingBodyStatus.Blocked ? " (not applied)"
-            : IsConfirmed(pending.Entry, row) ? " (confirmed)"
+        var flag = pending.Entry is PendingRemovalEntry
+            ? UiText.Status.FlagRemove
+            : UiText.Status.FlagAssign(pending.Entry.DisplayName);
+        var suffix = row.Status == PendingBodyStatus.Blocked ? UiText.Status.FlagNotAppliedSuffix
+            : IsConfirmed(pending.Entry, row) ? UiText.Status.FlagConfirmedSuffix
             : string.Empty;
-        return $"→ {pending.Entry.DisplayName}{suffix}";
+        return flag + suffix;
     }
 
-    private static bool IsConfirmed(PendingAssignmentEntry entry, PendingBodyRow row) =>
+    private static bool IsConfirmed(PendingEntry entry, PendingBodyRow row) =>
         row.Status == PendingBodyStatus.NeedsConfirmation && entry.ConfirmedBodyIds.Contains(row.Body.Id);
 
     private string DisplayMaterialText(BodyInfo body) =>
@@ -791,7 +792,7 @@ public sealed class BlockAccessor
 
     // ---- Pending assignment tree ----
 
-    public void PopulatePendingTree(IReadOnlyList<PendingAssignmentEntry> entries)
+    public void PopulatePendingTree(IReadOnlyList<PendingEntry> entries)
     {
         if (_pending is null)
             return;
@@ -816,14 +817,20 @@ public sealed class BlockAccessor
 
     /// <summary>Nothing in the pending tree has touched the part yet. Blocked and declined bodies are reported when the
     /// material is added and never listed, so a body is either waiting — with a rule's warning or the reassignment the
-    /// user confirmed — or was left behind by Apply, with why.</summary>
-    private static string StatusText(PendingAssignmentEntry entry, PendingBodyRow row)
+    /// user confirmed — or was left behind by Apply, with why. A pending removal names the material it will take off.</summary>
+    private string StatusText(PendingEntry entry, PendingBodyRow row)
     {
         if (row.Status == PendingBodyStatus.Blocked)
-            return $"Not applied — {row.Message ?? "unknown reason"}";
+            return UiText.Status.NotApplied(row.Message);
 
-        var status = IsConfirmed(entry, row) ? "Pending — confirmed" : "Pending";
-        return string.IsNullOrWhiteSpace(row.Message) ? status : $"{status}: {row.Message}";
+        if (entry is PendingRemovalEntry)
+        {
+            return UiText.Status.PendingRemoval(
+                CurrentAssignments.TryGetValue(row.Body.Id, out var assignment) ? assignment.MaterialName : null);
+        }
+
+        var status = IsConfirmed(entry, row) ? UiText.Status.PendingConfirmed : UiText.Status.Pending;
+        return string.IsNullOrWhiteSpace(row.Message) ? status : UiText.Status.WithNote(status, row.Message!);
     }
 
     // ---- Tree selection highlight ----
@@ -963,9 +970,8 @@ public sealed class BlockAccessor
     }
 
     // ---- Generic dialogs ----
-    // Forwards to the shared BANxOpen.Foundation.NxAdapters.NxMessageBoxHelper — these four have no dependency
-    // on this dialog's blocks or domain types, so the implementation lives once in the foundation instead of
-    // being duplicated per project.
+    // Forwards to the shared BANxOpen.Foundation.NxAdapters.NxMessageBoxHelper, whose titles are NxDialogText's. A failed
+    // result's message is the library's own wording and is shown as-is.
 
     public bool Confirm(string message) => NxMessageBoxHelper.Confirm(message);
 

@@ -18,7 +18,7 @@ public sealed record AssignmentRowRef(MaterialUsageRow Row, IReadOnlyList<BodyIn
 
 /// <summary>The same idea for <c>PendingAssignmentTree</c>: a root row is a whole pending entry, a child row
 /// is one body within it.</summary>
-public sealed record PendingRowRef(PendingAssignmentEntry Entry, PendingBodyRow? Row);
+public sealed record PendingRowRef(PendingEntry Entry, PendingBodyRow? Row);
 
 /// <summary>One context-menu entry, decided by the presenter and built into a <c>TreeListMenu</c> by
 /// <see cref="BlockAccessor"/>. Keeping it a plain record is what lets the presenter own the menu's content

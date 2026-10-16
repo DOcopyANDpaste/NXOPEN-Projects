@@ -14,9 +14,10 @@ internal static class SheetMetalConflictFinder
     ///
     /// Only the sheet metal bodies outside <paramref name="targets"/> count: the targets are about to take
     /// <paramref name="material"/>, so re-assigning every sheet metal body at once is not a conflict. A body
-    /// claimed by a pending entry counts as that entry's material and row, since that is what it will have. A body
-    /// already assigned counts as the part's current preferences row when that row is made of its material. Regular
-    /// solids have no shared state, so a selection with no sheet metal body never conflicts.</summary>
+    /// claimed by a pending assignment counts as that entry's material and row, and a body whose removal is pending as
+    /// having no material, since that is what each will have. A body already assigned counts as the part's current
+    /// preferences row when that row is made of its material. Regular solids have no shared state, so a selection with
+    /// no sheet metal body never conflicts.</summary>
     /// <param name="partRow">Reads the part's current preferences row. Called at most once, and only when there is
     /// another assigned sheet metal body to compare against: it is an NX query.</param>
     public static string? Find(
@@ -25,7 +26,7 @@ internal static class SheetMetalConflictFinder
         IReadOnlyList<BodyInfo> targets,
         IReadOnlyList<BodyInfo> allBodies,
         IReadOnlyDictionary<BodyId, BodyMaterialAssignment> currentAssignments,
-        IReadOnlyList<PendingAssignmentEntry> pending,
+        IReadOnlyList<PendingEntry> pending,
         Func<SheetMetalMaterialRow?> partRow)
     {
         if (!targets.Any(b => b.Kind == BodyKind.SheetMetal))
@@ -34,10 +35,16 @@ internal static class SheetMetalConflictFinder
         var targetIds = targets.Select(b => b.Id).ToHashSet();
 
         var stagedEntries = new Dictionary<BodyId, PendingAssignmentEntry>();
+        var pendingRemoval = new HashSet<BodyId>();
         foreach (var entry in pending)
         {
             foreach (var pendingRow in entry.Rows)
-                stagedEntries[pendingRow.Body.Id] = entry;
+            {
+                if (entry is PendingAssignmentEntry assignment)
+                    stagedEntries[pendingRow.Body.Id] = assignment;
+                else
+                    pendingRemoval.Add(pendingRow.Body.Id);
+            }
         }
 
         SheetMetalMaterialRow? currentPartRow = null;
@@ -46,6 +53,9 @@ internal static class SheetMetalConflictFinder
         var conflicting = new List<(BodyInfo Body, string Material, bool IsStaged)>();
         foreach (var body in allBodies.Where(b => b.Kind == BodyKind.SheetMetal && !targetIds.Contains(b.Id)))
         {
+            if (pendingRemoval.Contains(body.Id))
+                continue;
+
             string? otherMaterial;
             SheetMetalMaterialRow? otherRow;
             var isStaged = stagedEntries.TryGetValue(body.Id, out var staged);
@@ -78,20 +88,14 @@ internal static class SheetMetalConflictFinder
             if (sameMaterial && sameRow)
                 continue;
 
-            conflicting.Add((body, otherRow is null ? otherMaterial : $"{otherMaterial} [{otherRow.Name}]", isStaged));
+            conflicting.Add((body, otherRow is null ? otherMaterial : UiText.Labels.MaterialWithRow(otherMaterial, otherRow.Name), isStaged));
         }
 
         if (conflicting.Count == 0)
             return null;
 
-        var name = row is null ? material.Name : $"{material.Name} [{row.Name}]";
-        var details = conflicting.Select(x => $"  [{x.Body.Name}] {x.Material}{(x.IsStaged ? " (pending)" : string.Empty)}");
-        return
-            $"{name} cannot be assigned to sheet metal bodies in this part.{Environment.NewLine}{Environment.NewLine}" +
-            $"Sheet Metal Preferences belong to the part, so every sheet metal body in it must have the same " +
-            $"material and preferences row, and these already have a different one:{Environment.NewLine}" +
-            string.Join(Environment.NewLine, details) +
-            $"{Environment.NewLine}{Environment.NewLine}Nothing was assigned. Assign {name} to all of the " +
-            "sheet metal bodies together, or leave the sheet metal bodies out of the selection.";
+        var name = row is null ? material.Name : UiText.Labels.MaterialWithRow(material.Name, row.Name);
+        return UiText.SheetMetal.Conflict(
+            name, conflicting.Select(x => UiText.SheetMetal.ConflictLine(x.Body.Name, x.Material, x.IsStaged)));
     }
 }

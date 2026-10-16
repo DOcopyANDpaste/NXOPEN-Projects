@@ -58,9 +58,7 @@ public sealed class MaterialPropertyWindow : IMaterialPropertyWindow
             // Report rather than let an NX exception escape into the calling tree callback, which would
             // cross the managed boundary and destabilise the session.
             _logWarning?.Invoke($"Material property window could not be opened: {ex.Message}");
-            NxMessageBoxHelper.ShowError(
-                $"The material property window could not be opened.{Environment.NewLine}" +
-                "Check that MaterialDisplay_UIBlock.dlx is on the dialog search path.");
+            NxMessageBoxHelper.ShowError(UiText.Errors.PropertyWindowFailed(UiText.Errors.PropertyWindowDlxMissing));
         }
         finally
         {

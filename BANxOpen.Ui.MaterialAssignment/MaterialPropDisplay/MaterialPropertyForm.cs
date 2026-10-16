@@ -168,9 +168,9 @@ internal sealed class MaterialPropertyForm : Form
             // showing anything.
             SmallImageList = _rowHeightImages,
         };
-        listView.Columns.Add("Property", 220, HorizontalAlignment.Left);
-        listView.Columns.Add("Value", 160, HorizontalAlignment.Left);
-        listView.Columns.Add("Unit", 80, HorizontalAlignment.Left);
+        listView.Columns.Add(UiText.Columns.Property, 220, HorizontalAlignment.Left);
+        listView.Columns.Add(UiText.Columns.Value, 160, HorizontalAlignment.Left);
+        listView.Columns.Add(UiText.Columns.Unit, 80, HorizontalAlignment.Left);
 
         listView.DrawColumnHeader += DrawColumnHeader;
         listView.DrawItem += (_, e) => e.DrawDefault = false;
@@ -180,7 +180,7 @@ internal sealed class MaterialPropertyForm : Form
 
     private static void PopulateListView(ListView listView, Material material)
     {
-        AddSection(listView, "Properties");
+        AddSection(listView, UiText.Columns.PropertiesSection);
 
         // MatML properties come in three practical shapes and nothing declares which. A single value is one row;
         // a comma-separated list (a temperature-dependent table, typically) gets its own section with one row per

@@ -60,10 +60,9 @@ public sealed class WinFormsMaterialPropertyWindow : IMaterialPropertyWindow, ID
         }
         catch (Exception ex)
         {
-            // Still on the caller's (NX) thread here — safe to use NxMessageBoxHelper.
+            // Still on the caller's (NX) thread here — safe to show an NX message box.
             _logWarning?.Invoke($"Material property window could not be opened: {ex.Message}");
-            NxMessageBoxHelper.ShowError(
-                $"The material property window could not be opened.{Environment.NewLine}{ex.Message}");
+            NxMessageBoxHelper.ShowError(UiText.Errors.PropertyWindowFailed(ex.Message));
         }
     }
 
@@ -106,7 +105,7 @@ public sealed class WinFormsMaterialPropertyWindow : IMaterialPropertyWindow, ID
             if (_pumpStartFailed)
             {
                 _logWarning?.Invoke("Material property window pump thread failed to start.");
-                NxMessageBoxHelper.ShowError("The material property window could not be initialized.");
+                NxMessageBoxHelper.ShowError(UiText.Errors.PropertyWindowInitFailed);
             }
         }
     }

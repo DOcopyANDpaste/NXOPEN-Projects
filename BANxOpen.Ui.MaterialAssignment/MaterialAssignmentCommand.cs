@@ -19,7 +19,7 @@ public static class MaterialAssignmentCommand
         if (!NxSessionContext.TryInitialize(out var context, out var failureReason))
         {
             UI.GetUI().NXMessageBox.Show(
-                "Material Assignment", NXMessageBox.DialogType.Error, failureReason ?? "Could not start.");
+                UiText.Titles.Dialog, NXMessageBox.DialogType.Error, NxDialogText.Default.CouldNotStart(UiText.Titles.Dialog, failureReason));
             return;
         }
 
@@ -33,8 +33,8 @@ public static class MaterialAssignmentCommand
         if (!sheetMetal.Ok)
         {
             UI.GetUI().NXMessageBox.Show(
-                "Material Assignment", NXMessageBox.DialogType.Error,
-                sheetMetal.Message ?? "Sheet metal configuration could not be loaded.");
+                UiText.Titles.Dialog, NXMessageBox.DialogType.Error,
+                sheetMetal.Message ?? NxDialogText.Default.CouldNotStart(UiText.Titles.Dialog, null));
             return;
         }
 
@@ -53,7 +53,8 @@ public static class MaterialAssignmentCommand
         if (!engine.Ok)
         {
             UI.GetUI().NXMessageBox.Show(
-                "Material Assignment", NXMessageBox.DialogType.Error, engine.Message ?? "Material rules could not be loaded.");
+                UiText.Titles.Dialog, NXMessageBox.DialogType.Error,
+                engine.Message ?? NxDialogText.Default.CouldNotStart(UiText.Titles.Dialog, null));
             return;
         }
 

@@ -56,9 +56,9 @@ public sealed class MaterialPropDisplayAccessor
             return;
         }
 
-        _tree.InsertColumn(PropertyColumn.Name, "Property", 220);
-        _tree.InsertColumn(PropertyColumn.Value, "Value", 200);
-        _tree.InsertColumn(PropertyColumn.Unit, "Unit", 90);
+        _tree.InsertColumn(PropertyColumn.Name, UiText.Columns.Property, 220);
+        _tree.InsertColumn(PropertyColumn.Value, UiText.Columns.Value, 200);
+        _tree.InsertColumn(PropertyColumn.Unit, UiText.Columns.Unit, 90);
 
         foreach (var column in new[] { PropertyColumn.Name, PropertyColumn.Value, PropertyColumn.Unit })
             _tree.SetColumnResizePolicy(column, Tree.ColumnResizePolicy.ConstantWidth);

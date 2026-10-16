@@ -19,32 +19,49 @@ public enum PendingBodyStatus
 
 public sealed record PendingBodyRow(BodyInfo Body, PendingBodyStatus Status, string? Message);
 
-/// <summary>One staged "assign this material to these bodies" request. Nothing is applied to the part until
-/// OK/Apply; Cancel simply discards it. Presentation-only, like <see cref="MaterialUsageRow"/> — it carries the Core
-/// types an apply needs (<see cref="Input"/> and <see cref="Plan"/> go straight to
+/// <summary>One staged change to some bodies. Nothing is applied to the part until OK/Apply; Cancel simply discards it.
+/// A body is claimed by at most one entry, and the latest action replaces an earlier claim, so the order entries are
+/// applied in never matters. A body Apply could not change stays in its entry with
+/// <see cref="PendingBodyStatus.Blocked"/> and the reason as its message.</summary>
+public abstract record PendingEntry(IReadOnlyList<PendingBodyRow> Rows)
+{
+    /// <summary>How the entry is named to the user.</summary>
+    public abstract string DisplayName { get; }
+
+    /// <summary>The bodies whose rule asked for confirmation and the user said yes, so Apply does not ask again.</summary>
+    public IReadOnlyCollection<BodyId> ConfirmedBodyIds { get; init; } = Array.Empty<BodyId>();
+
+    public IReadOnlyList<BodyId> BodyIds => Rows.Select(r => r.Body.Id).ToList();
+}
+
+/// <summary>"Remove the material from these bodies". There is at most one, gathering every body whose removal is
+/// pending.</summary>
+public sealed record PendingRemovalEntry(IReadOnlyList<PendingBodyRow> Rows) : PendingEntry(Rows)
+{
+    public override string DisplayName => UiText.Labels.RemoveMaterialEntry;
+}
+
+/// <summary>"Assign this material to these bodies". Presentation-only, like <see cref="MaterialUsageRow"/> — it carries
+/// the Core types an apply needs (<see cref="Input"/> and <see cref="Plan"/> go straight to
 /// <c>IAssignmentPlanFinalizer.Finalize</c>) plus the per-body rows the pending tree renders.
 ///
 /// Only bodies that will be assigned are staged; blocked and declined bodies are reported to the user when the
 /// material is added and left out. Apply re-plans the entry against the part as it then stands, reusing the
-/// confirmations in <see cref="ConfirmedBodyIds"/>. A body Apply could not assign stays in the entry with
-/// <see cref="PendingBodyStatus.Blocked"/> and the reason as its message.</summary>
+/// confirmations in <see cref="PendingEntry.ConfirmedBodyIds"/>.</summary>
 public sealed record PendingAssignmentEntry(
     Material Material,
     MaterialAssignmentPlanningInput Input,
     AssignmentPlan Plan,
-    IReadOnlyList<PendingBodyRow> Rows)
+    IReadOnlyList<PendingBodyRow> Rows) : PendingEntry(Rows)
 {
     /// <summary>The sheet metal standards file row the user picked from the material tree, which the part's Sheet
     /// Metal Preferences are set to when the entry's sheet metal bodies are assigned. Null when a plain physical
     /// material was picked. Carried across re-plans.</summary>
     public SheetMetalMaterialRow? SheetMetalRow { get; init; }
 
-    /// <summary>The bodies whose rule asked for confirmation and the user said yes, so a rebuilt preview does not ask
-    /// again. Carried across re-plans.</summary>
-    public IReadOnlyCollection<BodyId> ConfirmedBodyIds { get; init; } = Array.Empty<BodyId>();
-
-    /// <summary>How the entry is named to the user: the material, with the picked row when there is one.</summary>
-    public string DisplayName => SheetMetalRow is { } row ? $"{Material.Name} [{row.Name}]" : Material.Name;
+    /// <summary>The material, with the picked row when there is one.</summary>
+    public override string DisplayName =>
+        SheetMetalRow is { } row ? UiText.Labels.MaterialWithRow(Material.Name, row.Name) : Material.Name;
 
     public static PendingAssignmentEntry Create(MaterialAssignmentPlanningInput input, AssignmentPlan plan)
     {
@@ -72,15 +89,7 @@ public sealed record PendingAssignmentEntry(
         return new PendingAssignmentEntry(input.RequestedMaterial, input, plan, rows);
     }
 
-    public IReadOnlyList<BodyId> BodyIds => Rows.Select(r => r.Body.Id).ToList();
-
-    /// <summary>False when every body in the entry is blocked — committing it would be a no-op, so the
-    /// presenter reports that instead of silently applying nothing.</summary>
-    public bool HasAnyApplicableBody => Rows.Any(r => r.Status != PendingBodyStatus.Blocked);
-
-    public IReadOnlyList<BodyId> BodyIdsNeedingConfirmation =>
-        Rows.Where(r => r.Status == PendingBodyStatus.NeedsConfirmation).Select(r => r.Body.Id).ToList();
-
+    /// <summary>The outcomes' messages, as their rules worded them (each library's describer).</summary>
     private static string? Describe(IReadOnlyList<RuleOutcome> outcomes)
     {
         var messages = outcomes.Select(o => o.Message).Where(m => !string.IsNullOrWhiteSpace(m)).ToList();

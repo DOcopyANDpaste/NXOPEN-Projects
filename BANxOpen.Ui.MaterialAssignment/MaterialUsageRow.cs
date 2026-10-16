@@ -10,7 +10,7 @@ namespace BANxOpen.Ui.MaterialAssignment;
 /// <see cref="AssignmentRowRef"/>.</summary>
 public sealed record MaterialUsageRow(string MaterialLabel, MaterialId? ResolvedMaterialId, int BodyCount)
 {
-    public const string UnassignedLabel = "(No material assigned)";
+    public const string UnassignedLabel = UiText.Labels.Unassigned;
 
     public bool IsUnassignedBucket => ResolvedMaterialId is null && string.Equals(MaterialLabel, UnassignedLabel, StringComparison.Ordinal);
 }

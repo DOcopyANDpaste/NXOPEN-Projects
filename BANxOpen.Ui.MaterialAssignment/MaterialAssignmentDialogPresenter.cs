@@ -1,3 +1,4 @@
+using BANxOpen.Materials.Core;
 using BANxOpen.Materials.Core.Assignment;
 using BANxOpen.Materials.Core.Bodies;
 using BANxOpen.Foundation.Contracts.Common;
@@ -16,17 +17,15 @@ namespace BANxOpen.Ui.MaterialAssignment;
 /// <summary>All dialog logic — the generated <c>BlockUI.cs</c> stays a thin set of delegations to this
 /// class, per Skills/with-block-ui.md §1.
 ///
-/// Assigning stages. "Add to pending" on the material tree plans the selection, asks the rule confirmations, and
-/// lists what will be assigned in the pending tree — the part is not touched, so the current-assignment tree keeps
-/// showing what the bodies really have, with the pending change flagged beside each one. Bodies that already have the
-/// material, and blocked or declined bodies, are reported and not staged; a body they leave out keeps any earlier
-/// pending claim. OK/Apply apply the pending list; whatever does not apply stays pending with the reason. Cancel,
-/// "Remove from pending" and "Clear all pending" only drop entries. Target bodies always come from the
-/// <c>Sel_SoildBodies</c> selection block. The decision tree is in README.md.
+/// Changes are staged. "Add to pending" on the material tree and "Remove material" on the current-assignment tree only
+/// list the change in the pending tree — the part is not touched, so the current-assignment tree keeps showing what the
+/// bodies really have, with the pending change flagged beside each one. A body has at most one pending change; the
+/// latest action replaces an earlier one. OK/Apply apply the pending list, and Apply is final; whatever does not apply
+/// stays pending with the reason. Cancel, "Remove from pending" and "Clear all pending" only drop entries. Target
+/// bodies for an assignment come from the <c>Sel_SoildBodies</c> selection block. The decision tree is in README.md,
+/// and every text the user sees is in <see cref="UiText"/>.
 ///
-/// <see cref="_sessionUndo"/> is the mark set when the dialog opens, so that Cancel can offer to revert what was
-/// applied while it was open. Sheet-metal-specific checks and messages live in the <c>SheetMetalSupport</c>
-/// folder.</summary>
+/// Sheet-metal-specific checks and messages live in the <c>SheetMetalSupport</c> folder.</summary>
 public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 {
     // Context-menu ids. Distinct ranges per tree so a stray id can never be mistaken for another tree's
@@ -81,7 +80,9 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     private IReadOnlyList<BodyInfo> _allBodies = Array.Empty<BodyInfo>();
     private IReadOnlyDictionary<BodyId, BodyMaterialAssignment> _currentAssignments =
         new Dictionary<BodyId, BodyMaterialAssignment>();
-    private readonly List<PendingAssignmentEntry> _pending = new();
+
+    // At most one PendingRemovalEntry, and any number of PendingAssignmentEntry; each body in at most one entry.
+    private readonly List<PendingEntry> _pending = new();
 
     // The part's Sheet Metal Preferences, re-read with the body state. Null outside sheet metal parts.
     private SheetMetalPartPreference? _partPreference;
@@ -94,10 +95,6 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     // bodies disagree with that row is pointed out.
     private bool _filterSeeded;
     private bool _initialSyncChecked;
-
-    // What was changed in the part while the dialog was open, for Cancel to list, and the mark it reverts to.
-    private readonly List<string> _appliedThisSession = new();
-    private UndoScope? _sessionUndo;
 
     public MaterialAssignmentDialogPresenter(
         NxSessionContext context,
@@ -135,16 +132,12 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     public void OnDialogShown()
     {
-        // ??= because this may re-fire on a tab switch (see OnUpdate), and a second mark would make Cancel's
-        // revert stop short of whatever was applied before the switch.
-        _sessionUndo ??= new UndoScope(_context.Session, "Material Assignment dialog", _context.Log.Error);
-
         _blocks.ShowSheetMetalGradeColumn = _context.IsSheetMetalApplication;
         _blocks.ClearHighlight();
         _blocks.SetUpColumns();
 
-        // Re-selects the library already in use, for the same re-fire reason as the undo mark: a re-fire must not
-        // throw away the library or the Sheet Metal Preferences filters the user chose. The filters live in _filter
+        // Re-selects the library already in use: this may re-fire on a tab switch (see OnUpdate), and a re-fire must
+        // not throw away the library or the Sheet Metal Preferences filters the user chose. The filters live in _filter
         // and are put back by OnLibrarySelectionChanged.
         _libraries = ListLibrariesForApplication();
         _blocks.PopulateLibraryEnum(_libraries, _currentLibraryReference?.Id);
@@ -189,7 +182,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         if (autoSelect)
             _blocks.SetSelectedBodies(new[] { sheetMetalBodies[0].Id });
 
-        _blocks.ShowInfo("Sheet Metal Preferences", SheetMetalPreferenceSync.OpenMessage(preference, notInSync, autoSelect));
+        _blocks.ShowInfo(UiText.Titles.SheetMetalPreferences, SheetMetalPreferenceSync.OpenMessage(preference, notInSync, autoSelect));
     }
 
     /// <summary>Every library, except in the NX Sheet Metal application, where only sheet metal libraries are offered.
@@ -258,12 +251,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         if (PickedSheetMetalMaterial() is { } pick)
             return ApplyPickedSheetMetalMaterial(pick) ? 0 : 1;
 
-        _blocks.ShowError(
-            "Nothing is pending. Select bodies, then right-click a material and choose \"Add to pending\"." +
-            (_isSheetMetalLibrary
-                ? $"{Environment.NewLine}{Environment.NewLine}For a sheet metal library you can also pick a sheet metal " +
-                  "material (a row under a physical material) and Apply it."
-                : string.Empty));
+        _blocks.ShowError(UiText.Errors.NothingPending(_isSheetMetalLibrary));
         return 1;
     }
 
@@ -287,71 +275,20 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         }
 
         _blocks.ClearHighlight();
-        CloseKeepingChanges();
         return 0;
     }
 
-    /// <summary>Cancel (and the title bar's close, which NX routes to the same callback). Pending entries were never
-    /// applied, so they are discarded after a warning. Anything applied while the dialog was open — Apply, "Remove
-    /// material", Sheet Metal Preferences — is listed, and the user chooses whether to revert to the state the part
-    /// was in when the dialog opened or keep it.</summary>
+    /// <summary>Cancel (and the title bar's close, which NX routes to the same callback). Apply is final, so nothing
+    /// applied is reverted; pending changes were never applied, so they are discarded after a warning.</summary>
     /// <returns>1 to keep the dialog open, 0 to let it close.</returns>
     public int OnCancel()
     {
-        var previewNote = _pending.Count > 0
-            ? $"{_pending.Count} pending assignment(s) were never applied and will be discarded."
-            : null;
+        if (_pending.Count > 0 && !_blocks.Confirm(UiText.Confirm.DiscardPending(_pending.Count)))
+            return 1;
 
-        if (_appliedThisSession.Count == 0)
-        {
-            if (previewNote is not null && !_blocks.Confirm($"{previewNote}{Environment.NewLine}{Environment.NewLine}Close anyway?"))
-                return 1;
-
-            _pending.Clear();
-            CloseKeepingChanges();
-            _blocks.ClearHighlight();
-            return 0;
-        }
-
-        var message =
-            $"These changes were applied while this dialog was open:{Environment.NewLine}" +
-            string.Join(Environment.NewLine, _appliedThisSession.Select(c => $"  {c}")) +
-            (previewNote is null ? string.Empty : $"{Environment.NewLine}{Environment.NewLine}{previewNote}") +
-            $"{Environment.NewLine}{Environment.NewLine}Revert them?{Environment.NewLine}" +
-            $"  Yes - revert to the state the part was in before this dialog opened.{Environment.NewLine}" +
-            "  No - keep the changes.";
-
-        var revert = _blocks.Confirm(message);
         _pending.Clear();
-
-        if (revert)
-        {
-            // Disposing without committing is what undoes to the mark.
-            _sessionUndo?.Dispose();
-            _sessionUndo = null;
-        }
-        else
-        {
-            CloseKeepingChanges();
-        }
-
         _blocks.ClearHighlight();
         return 0;
-    }
-
-    /// <summary>Notes a change for Cancel to list. A partial failure still changed the part; an aborted
-    /// operation rolled itself back and did not.</summary>
-    private void RecordApplied(OperationResult result, string description)
-    {
-        if (result.Ok || result.ErrorCode == "PARTIAL_FAILURE")
-            _appliedThisSession.Add(description);
-    }
-
-    private void CloseKeepingChanges()
-    {
-        _sessionUndo?.Commit();
-        _sessionUndo?.Dispose();
-        _sessionUndo = null;
     }
 
     /// <summary>Re-queries the physical/display material state from the part and re-renders everything derived
@@ -385,10 +322,9 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     }
 
     /// <summary>Apply/OK with a sheet metal material picked and nothing pending. With bodies selected it assigns the
-    /// material to them, as "Add to pending" then Apply would. With none, it sets only the part's
-    /// Sheet Metal Preferences, after warning that the bodies' own material and colour are left as they are — but only
-    /// on a part with no solid body: once there are bodies, the preferences go with them, so they are never set on
-    /// their own.</summary>
+    /// material to them, as "Add to pending" then Apply would. With none, it sets only the part's Sheet Metal
+    /// Preferences, after warning that the bodies' own material and colour are left as they are — but only on a part
+    /// with no solid body: once there are bodies, the preferences go with them, so they are never set on their own.</summary>
     /// <returns>False when not everything was applied — the user backed out, the part has bodies to assign, or NX
     /// refused.</returns>
     private bool ApplyPickedSheetMetalMaterial(MaterialPick pick)
@@ -399,22 +335,15 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         var row = pick.Row!;
         if (PartHasSolid)
         {
-            _blocks.ShowError(
-                $"No solid body is selected. This part has bodies, so '{row.Name}' has to be assigned to them: the Sheet " +
-                "Metal Preferences are set together with the bodies' material, which keeps the two in sync." +
-                $"{Environment.NewLine}{Environment.NewLine}Select the bodies, then Apply again.");
+            _blocks.ShowError(UiText.Errors.NoSolidSelectedForRow(row.Name));
             return false;
         }
 
-        var message =
-            $"This part has no solid body, so only its Sheet Metal Preferences will be set to '{row.Name}' " +
-            $"({row.Describe()}).{Environment.NewLine}{Environment.NewLine}Continue?";
-
-        return _blocks.Confirm(message) && ApplySheetMetalPreferenceOnly(row);
+        return _blocks.Confirm(UiText.Confirm.SetPreferencesOnly(row.Name, row.Describe())) && ApplySheetMetalPreferenceOnly(row);
     }
 
     /// <summary>Sets the part's Sheet Metal Preferences to <paramref name="row"/> and nothing else — no body is
-    /// assigned and nothing is staged. Recorded like any other change, so Cancel can revert it.</summary>
+    /// assigned and nothing is staged. Final, like Apply.</summary>
     private bool ApplySheetMetalPreferenceOnly(SheetMetalMaterialRow row)
     {
         // The service sets no undo mark of its own; a refused change must not leave a half-built preferences edit.
@@ -426,9 +355,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 undo.Commit();
         }
 
-        _blocks.ShowResult(result, $"Sheet Metal Preferences set to '{row.Name}' ({row.Describe()}).");
-
-        RecordApplied(result, $"Sheet Metal Preferences set to {row.Name}");
+        _blocks.ShowResult(result, UiText.Info.SheetMetalPreferencesSet(row.Name, row.Describe()));
         OnRefreshClicked();
         return result.Ok;
     }
@@ -457,7 +384,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
         if (ids.Count == 0)
         {
-            _blocks.ShowError("Every solid body in this part already has a material.");
+            _blocks.ShowError(UiText.Errors.EverySolidHasMaterial);
             return;
         }
 
@@ -570,12 +497,12 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
         if (pick.Row is { } row)
         {
-            lines.Add($"Sheet metal material made of {material.Name}");
+            lines.Add(UiText.Labels.SheetMetalMaterialMadeOf(material.Name));
             lines.Add(row.Describe());
         }
 
         if (material.Category.PathSegments.Count > 0)
-            lines.Add(string.Join(" > ", material.Category.PathSegments));
+            lines.Add(string.Join(UiText.Labels.CategorySeparator, material.Category.PathSegments));
         else
             lines.Add(material.Category.DisplayName);
 
@@ -592,24 +519,24 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     public IReadOnlyList<TreeMenuItem> BuildMaterialMenu(MaterialPick? clicked)
     {
         if (clicked is null)
-            return new[] { new TreeMenuItem(MaterialMenu.Refresh, "Refresh") };
+            return new[] { new TreeMenuItem(MaterialMenu.Refresh, UiText.Menu.Refresh) };
 
         // Assignment needs a target, and the selection block is the only source of one.
         var hasBodies = _blocks.GetSelectedBodyIds().Count > 0;
 
         var items = new List<TreeMenuItem>
         {
-            new(MaterialMenu.Assign, "Add to pending", hasBodies),
+            new(MaterialMenu.Assign, UiText.Menu.AddToPending, hasBodies),
         };
 
         // Sets the part's preferences straight away — no bodies, nothing pending. Only a row can be applied, and
         // only on a part with no solid body: once there are bodies, the preferences go with their material.
         if (_isSheetMetalLibrary && !PartHasSolid)
-            items.Add(new TreeMenuItem(MaterialMenu.ApplySheetMetalPreference, "Apply sheet metal preference", clicked.Row is not null));
+            items.Add(new TreeMenuItem(MaterialMenu.ApplySheetMetalPreference, UiText.Menu.ApplySheetMetalPreference, clicked.Row is not null));
 
         items.Add(TreeMenuItem.Separator);
-        items.Add(new TreeMenuItem(MaterialMenu.Properties, "Properties..."));
-        items.Add(new TreeMenuItem(MaterialMenu.Refresh, "Refresh"));
+        items.Add(new TreeMenuItem(MaterialMenu.Properties, UiText.Menu.Properties));
+        items.Add(new TreeMenuItem(MaterialMenu.Refresh, UiText.Menu.Refresh));
         return items;
     }
 
@@ -634,13 +561,14 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         }
     }
 
-    // ---- Staging ----
+    // ---- Staging an assignment ----
 
     /// <summary>Plans the selected bodies against <paramref name="pick"/>, asks the confirmations its rules need, and
     /// adds what will be assigned to the pending list. The part is not touched. A body that already has the material
     /// is not staged, and an earlier pending change to it is dropped — assigning what it has means leaving it as it is.
     /// Blocked and declined bodies are reported and not staged, and keep any earlier pending claim. Only the bodies
-    /// that are staged are taken out of their earlier entry, so one body is never claimed twice.</summary>
+    /// that are staged are taken out of their earlier entry (an assignment or the removal), so one body is never
+    /// claimed twice.</summary>
     /// <returns>False when nothing was staged.</returns>
     private bool Stage(MaterialPick pick)
     {
@@ -648,17 +576,18 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         if (targets is null)
             return false;
 
-        var pendingIds = _pending.SelectMany(e => e.BodyIds).ToHashSet();
+        var claims = ClaimsByBody();
         var alreadyHas = targets.Where(b => AlreadyHas(b, pick.Material, pick.Row)).ToList();
         var notStaged = alreadyHas
-            .Select(b => $"  [{b.Name}] already has {pick.Material.Name}" +
-                         (pendingIds.Contains(b.Id) ? "; its earlier pending change was removed" : string.Empty))
+            .Select(b => UiText.Reasons.BodyLine(b.Name, UiText.Reasons.AlreadyHas(pick.Material.Name) +
+                         (claims.ContainsKey(b.Id) ? UiText.Reasons.EarlierPendingChangeRemovedSuffix : string.Empty)))
             .ToList();
         if (alreadyHas.Count > 0)
             ReplacePending(WithoutBodies(_pending, alreadyHas.Select(b => b.Id).ToList()));
 
         var remaining = targets.Where(b => !alreadyHas.Contains(b)).ToList();
         PendingAssignmentEntry? staged = null;
+        var replaced = new List<string>();
         var warnings = new List<string>();
 
         if (remaining.Count > 0)
@@ -681,6 +610,13 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
             if (rows.Count > 0)
             {
                 staged = entry with { Rows = rows, ConfirmedBodyIds = confirmed.ToList() };
+
+                // A pending removal being replaced is worth saying: the user may not expect the body to keep a material.
+                replaced = rows
+                    .Where(r => claims.TryGetValue(r.Body.Id, out var claim) && claim is PendingRemovalEntry)
+                    .Select(r => UiText.Reasons.BodyLine(r.Body.Name, UiText.Reasons.PendingRemovalReplaced))
+                    .ToList();
+
                 ReplacePending(WithoutBodies(_pending, staged.BodyIds));
                 _pending.Add(staged);
 
@@ -688,12 +624,12 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 // for example a bead on the body that matches no SPEC, whose restriction is therefore not enforced.
                 warnings = rows
                     .Where(r => r.Status == PendingBodyStatus.Ok && !string.IsNullOrWhiteSpace(r.Message))
-                    .Select(r => $"  [{r.Body.Name}] {r.Message}")
+                    .Select(r => UiText.Reasons.BodyLine(r.Body.Name, r.Message!))
                     .ToList();
             }
         }
 
-        ReportStaging(pick.DisplayName, staged, notStaged, warnings, onlyAlreadyAssigned: remaining.Count == 0);
+        ReportStaging(pick.DisplayName, staged, notStaged, replaced, warnings, onlyAlreadyAssigned: remaining.Count == 0);
         RenderPending();
         return staged is not null;
     }
@@ -716,164 +652,266 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     private static IEnumerable<string> NotStagedLines(PendingAssignmentEntry entry, HashSet<BodyId> confirmedBodyIds) =>
         entry.Rows
             .Where(r => r.Status == PendingBodyStatus.Blocked)
-            .Select(r => $"  [{r.Body.Name}] blocked: {r.Message}")
+            .Select(r => UiText.Reasons.BodyLine(r.Body.Name, UiText.Reasons.Blocked(r.Message)))
             .Concat(entry.Rows
                 .Where(r => r.Status == PendingBodyStatus.NeedsConfirmation && !confirmedBodyIds.Contains(r.Body.Id))
-                .Select(r => $"  [{r.Body.Name}] skipped: not confirmed"));
+                .Select(r => UiText.Reasons.BodyLine(r.Body.Name, UiText.Reasons.SkippedNotConfirmed)));
 
     /// <summary>One message for everything about an "Add to pending" the pending tree does not show: bodies left out
-    /// and why, and warnings. A clean add needs no message — the pending tree shows it.</summary>
+    /// and why, pending removals it replaced, and warnings. A clean add needs no message — the pending tree shows it.</summary>
     private void ReportStaging(
         string displayName,
         PendingAssignmentEntry? staged,
         IReadOnlyList<string> notStaged,
+        IReadOnlyList<string> replaced,
         IReadOnlyList<string> warnings,
         bool onlyAlreadyAssigned)
     {
         var sections = new List<string>();
         if (notStaged.Count > 0)
-            sections.Add($"Not added to pending:{Environment.NewLine}{string.Join(Environment.NewLine, notStaged)}");
+            sections.Add(UiText.Info.Section(UiText.Info.NotAddedHeader, notStaged));
+        if (replaced.Count > 0)
+            sections.Add(UiText.Info.Section(UiText.Info.ReplacedHeader, replaced));
         if (warnings.Count > 0)
-            sections.Add($"Warnings:{Environment.NewLine}{string.Join(Environment.NewLine, warnings)}");
+            sections.Add(UiText.Info.Section(UiText.Info.WarningsHeader, warnings));
 
         if (sections.Count == 0)
             return;
 
-        var details = string.Join($"{Environment.NewLine}{Environment.NewLine}", sections);
+        var details = UiText.Info.JoinSections(sections);
         if (staged is not null)
-        {
-            _blocks.ShowInfo("Material Assignment",
-                $"{displayName} added to pending for {staged.Rows.Count} body(ies).{Environment.NewLine}{Environment.NewLine}{details}");
-        }
+            _blocks.ShowInfo(UiText.Titles.Dialog, UiText.Info.AddedToPending(displayName, staged.Rows.Count, details));
         else if (onlyAlreadyAssigned)
-        {
-            // Nothing went wrong: every selected body already has the material.
-            _blocks.ShowInfo("Material Assignment", $"Nothing to add to pending.{Environment.NewLine}{Environment.NewLine}{details}");
-        }
+            _blocks.ShowInfo(UiText.Titles.Dialog, UiText.Info.NothingAddedToPending(details)); // nothing went wrong
         else
+            _blocks.ShowError(UiText.Errors.NotAddedToPending(displayName, details));
+    }
+
+    // ---- Staging a removal ----
+
+    /// <summary>Adds <paramref name="bodyIds"/> to the pending removal. The part is not touched. A body with no material
+    /// has nothing to remove and is skipped; a body pending an assignment has that assignment replaced by the removal,
+    /// and the user is told.</summary>
+    private void StageRemoval(IReadOnlyList<BodyId> bodyIds)
+    {
+        if (bodyIds.Count == 0)
         {
-            _blocks.ShowError($"{displayName} was not added to pending.{Environment.NewLine}{Environment.NewLine}{details}");
+            _blocks.ShowError(UiText.Errors.SelectBodiesToRemove);
+            return;
         }
+
+        var requested = bodyIds.ToHashSet();
+        var bodies = _allBodies.Where(b => requested.Contains(b.Id)).ToList();
+        var claims = ClaimsByBody();
+
+        var noMaterial = bodies.Where(b => SheetMetalBodies.MaterialOf(b.Id, _currentAssignments) is null).ToList();
+        var toRemove = bodies.Where(b => !noMaterial.Contains(b)).ToList();
+
+        var notStaged = noMaterial.Select(b => UiText.Reasons.BodyLine(b.Name, UiText.Reasons.HasNoMaterial)).ToList();
+        var replaced = toRemove
+            .Where(b => claims.TryGetValue(b.Id, out var claim) && claim is PendingAssignmentEntry)
+            .Select(b => UiText.Reasons.BodyLine(b.Name, UiText.Reasons.PendingAssignmentReplaced(claims[b.Id].DisplayName)))
+            .ToList();
+
+        if (toRemove.Count > 0)
+        {
+            var existing = _pending.OfType<PendingRemovalEntry>().FirstOrDefault();
+            var kept = existing?.Rows.Where(r => !toRemove.Any(b => b.Id == r.Body.Id)) ?? Enumerable.Empty<PendingBodyRow>();
+            var removal = new PendingRemovalEntry(
+                kept.Concat(toRemove.Select(b => new PendingBodyRow(b, PendingBodyStatus.Ok, null))).ToList());
+
+            ReplacePending(WithoutBodies(_pending.Where(e => e is not PendingRemovalEntry), toRemove.Select(b => b.Id).ToList()));
+            _pending.Insert(0, removal);
+        }
+
+        var sections = new List<string>();
+        if (notStaged.Count > 0)
+            sections.Add(UiText.Info.Section(UiText.Info.NotAddedHeader, notStaged));
+        if (replaced.Count > 0)
+            sections.Add(UiText.Info.Section(UiText.Info.ReplacedHeader, replaced));
+
+        if (sections.Count > 0)
+        {
+            var details = UiText.Info.JoinSections(sections);
+            _blocks.ShowInfo(UiText.Titles.Dialog, toRemove.Count > 0
+                ? UiText.Info.RemovalAddedToPending(toRemove.Count, details)
+                : UiText.Info.NothingToRemove(details));
+        }
+
+        RenderPending();
     }
 
     // ---- Committing ----
 
-    /// <summary>Applies every pending entry to the part, in order, each re-planned against the part as it now stands
-    /// (the dialog is interactive, so it may have changed since the entry was staged). The confirmations each entry
-    /// was given are reused; a body that newly needs one is asked. A body that is not assigned — gone from the part,
-    /// blocked or declined now, in a sheet metal conflict, or refused by NX — stays pending with the reason.</summary>
+    /// <summary>Applies every pending change to the part — the removal first, then each assignment in order, each
+    /// re-planned against the part as it now stands (the dialog is interactive, so it may have changed since the entry
+    /// was staged). The confirmations each entry was given are reused; a body that newly needs one is asked. A body
+    /// that is not changed — gone from the part, blocked or declined now, in a sheet metal conflict, or refused by NX —
+    /// stays pending with the reason. What was applied is final.</summary>
     /// <returns>True when everything was applied and nothing is left pending.</returns>
     private bool CommitPending()
     {
         RefreshBodyState();
 
-        var leftOver = new List<PendingAssignmentEntry>();
+        var leftOver = new List<PendingEntry>();
         var report = new List<string>();
 
-        foreach (var old in _pending.ToList())
-        {
-            var lines = new List<string>();
-            var bodies = old.Rows
-                .Select(r => _allBodies.FirstOrDefault(b => b.Id == r.Body.Id))
-                .OfType<BodyInfo>()
-                .ToList();
-            lines.AddRange(old.Rows
-                .Where(r => bodies.All(b => b.Id != r.Body.Id))
-                .Select(r => $"  [{r.Body.Name}] no longer in the work part"));
+        if (_pending.OfType<PendingRemovalEntry>().FirstOrDefault() is { } removal)
+            CommitRemoval(removal, leftOver, report);
 
-            var failed = new List<PendingBodyRow>();
-            if (bodies.Count > 0)
-            {
-                var entry = Replan(old.Material, old.SheetMetalRow, bodies);
-                var confirmed = old.ConfirmedBodyIds.ToHashSet();
-
-                if (FindSheetMetalConflict(entry.Material, entry.SheetMetalRow, bodies) is { } conflict)
-                {
-                    failed.AddRange(entry.Rows.Select(r => NotApplied(r, "conflicts with another sheet metal body's material")));
-                    lines.Add($"  {conflict}");
-                }
-                else
-                {
-                    var unanswered = entry with { Rows = entry.Rows.Where(r => !confirmed.Contains(r.Body.Id)).ToList() };
-                    confirmed.UnionWith(GetConfirmedBodyIds(unanswered));
-
-                    var executablePlan = _finalizer.Finalize(entry.Plan, entry.Input, confirmed);
-                    var executableIds = executablePlan.Assignments.Select(a => a.BodyId).ToHashSet();
-
-                    foreach (var row in entry.Rows.Where(r => !executableIds.Contains(r.Body.Id)))
-                    {
-                        var reason = row.Status == PendingBodyStatus.Blocked ? $"blocked: {row.Message}" : "not confirmed";
-                        failed.Add(NotApplied(row, reason));
-                        lines.Add($"  [{row.Body.Name}] {reason}");
-                    }
-
-                    var applied = 0;
-                    if (executablePlan.Assignments.Count > 0)
-                    {
-                        var result = _partMaterialService.ApplyPlan(executablePlan);
-
-                        // The next entry is planned against what this one did, and a partial failure is told apart
-                        // body by body from what the part now really has — NX does not say which bodies failed.
-                        RefreshBodyState();
-
-                        var nxFailure = result.Message ?? "NX did not apply the material";
-                        foreach (var row in entry.Rows.Where(r => executableIds.Contains(r.Body.Id)))
-                        {
-                            var took = result.Ok
-                                       || (result.ErrorCode == "PARTIAL_FAILURE"
-                                           && SheetMetalBodies.SameName(SheetMetalBodies.MaterialOf(row.Body.Id, _currentAssignments), entry.Material.Name));
-                            if (took)
-                            {
-                                applied++;
-                                if (row.Status == PendingBodyStatus.Ok && !string.IsNullOrWhiteSpace(row.Message))
-                                    lines.Add($"  [{row.Body.Name}] warning: {row.Message}");
-                                continue;
-                            }
-
-                            failed.Add(NotApplied(row, nxFailure));
-                            lines.Add($"  [{row.Body.Name}] {nxFailure}");
-                        }
-                    }
-
-                    if (applied > 0)
-                        _appliedThisSession.Add($"{entry.DisplayName} assigned to {applied} body(ies)");
-                }
-
-                if (failed.Count > 0)
-                    leftOver.Add(entry with { Rows = failed, ConfirmedBodyIds = confirmed.ToList() });
-            }
-
-            if (lines.Count > 0)
-                report.Add($"{old.DisplayName}:{Environment.NewLine}{string.Join(Environment.NewLine, lines)}");
-        }
+        foreach (var entry in _pending.OfType<PendingAssignmentEntry>().ToList())
+            CommitAssignment(entry, leftOver, report);
 
         ReplacePending(leftOver);
 
         if (report.Count > 0)
         {
-            var message =
-                (leftOver.Count > 0
-                    ? "Some pending assignments were not applied and are still pending:"
-                    : "The pending assignments were applied, with these notes:") +
-                $"{Environment.NewLine}{Environment.NewLine}{string.Join($"{Environment.NewLine}{Environment.NewLine}", report)}";
-
+            var details = UiText.Info.JoinSections(report);
             if (leftOver.Count > 0)
-                _blocks.ShowError(message);
+                _blocks.ShowError(UiText.Errors.StillPending(details));
             else
-                _blocks.ShowInfo("Material Assignment", message);
+                _blocks.ShowInfo(UiText.Titles.Dialog, UiText.Info.AppliedWithNotes(details));
         }
 
         OnRefreshClicked();
         return leftOver.Count == 0;
     }
 
-    /// <summary>A body Apply could not assign, as it stays in the pending tree.</summary>
+    private void CommitRemoval(PendingRemovalEntry removal, List<PendingEntry> leftOver, List<string> report)
+    {
+        var lines = new List<string>();
+        var (bodies, gone) = StillPresent(removal);
+        lines.AddRange(gone);
+
+        var failed = new List<PendingBodyRow>();
+        if (bodies.Count > 0)
+        {
+            var result = _partMaterialService.ClearMaterial(bodies.Select(b => b.Id).ToList());
+            RefreshBodyState();
+
+            // NX does not say which bodies failed a partial clear; the part does.
+            foreach (var row in removal.Rows.Where(r => bodies.Any(b => b.Id == r.Body.Id)))
+            {
+                var took = result.Ok
+                           || (result.ErrorCode == MaterialsCodes.PartialFailure && SheetMetalBodies.MaterialOf(row.Body.Id, _currentAssignments) is null);
+                if (took)
+                    continue;
+
+                var reason = UiText.Reasons.FailedOnBody(result);
+                failed.Add(NotApplied(row, reason));
+                lines.Add(UiText.Reasons.BodyLine(row.Body.Name, reason));
+            }
+        }
+
+        if (failed.Count > 0)
+            leftOver.Add(removal with { Rows = failed });
+        if (lines.Count > 0)
+            report.Add(UiText.Info.EntryReport(removal.DisplayName, lines));
+    }
+
+    private void CommitAssignment(PendingAssignmentEntry old, List<PendingEntry> leftOver, List<string> report)
+    {
+        var lines = new List<string>();
+        var (bodies, gone) = StillPresent(old);
+        lines.AddRange(gone);
+
+        if (bodies.Count > 0)
+        {
+            var failed = new List<PendingBodyRow>();
+            var entry = Replan(old.Material, old.SheetMetalRow, bodies);
+            var confirmed = old.ConfirmedBodyIds.ToHashSet();
+
+            if (FindSheetMetalConflict(entry.Material, entry.SheetMetalRow, bodies) is { } conflict)
+            {
+                failed.AddRange(entry.Rows.Select(r => NotApplied(r, UiText.Reasons.ConflictsWithSheetMetal)));
+                lines.Add(conflict);
+            }
+            else
+            {
+                var unanswered = entry with { Rows = entry.Rows.Where(r => !confirmed.Contains(r.Body.Id)).ToList() };
+                confirmed.UnionWith(GetConfirmedBodyIds(unanswered));
+
+                var executablePlan = _finalizer.Finalize(entry.Plan, entry.Input, confirmed);
+                var executableIds = executablePlan.Assignments.Select(a => a.BodyId).ToHashSet();
+
+                foreach (var row in entry.Rows.Where(r => !executableIds.Contains(r.Body.Id)))
+                {
+                    var reason = row.Status == PendingBodyStatus.Blocked
+                        ? UiText.Reasons.Blocked(row.Message)
+                        : UiText.Reasons.NotConfirmed;
+                    failed.Add(NotApplied(row, reason));
+                    lines.Add(UiText.Reasons.BodyLine(row.Body.Name, reason));
+                }
+
+                if (executablePlan.Assignments.Count > 0)
+                {
+                    var result = _partMaterialService.ApplyPlan(executablePlan);
+
+                    // The next entry is planned against what this one did, and a partial failure is told apart body by
+                    // body from what the part now really has — NX does not say which bodies failed.
+                    RefreshBodyState();
+
+                    foreach (var row in entry.Rows.Where(r => executableIds.Contains(r.Body.Id)))
+                    {
+                        var took = result.Ok
+                                   || (result.ErrorCode == MaterialsCodes.PartialFailure
+                                       && SheetMetalBodies.SameName(SheetMetalBodies.MaterialOf(row.Body.Id, _currentAssignments), entry.Material.Name));
+                        if (took)
+                        {
+                            if (row.Status == PendingBodyStatus.Ok && !string.IsNullOrWhiteSpace(row.Message))
+                                lines.Add(UiText.Reasons.BodyLine(row.Body.Name, UiText.Reasons.Warning(row.Message)));
+                            continue;
+                        }
+
+                        var reason = UiText.Reasons.FailedOnBody(result);
+                        failed.Add(NotApplied(row, reason));
+                        lines.Add(UiText.Reasons.BodyLine(row.Body.Name, reason));
+                    }
+                }
+            }
+
+            if (failed.Count > 0)
+                leftOver.Add(entry with { Rows = failed, ConfirmedBodyIds = confirmed.ToList() });
+        }
+
+        if (lines.Count > 0)
+            report.Add(UiText.Info.EntryReport(old.DisplayName, lines));
+    }
+
+    /// <summary>The entry's bodies still in the work part, and a report line for each that is gone.</summary>
+    private (List<BodyInfo> Present, List<string> GoneLines) StillPresent(PendingEntry entry)
+    {
+        var present = entry.Rows
+            .Select(r => _allBodies.FirstOrDefault(b => b.Id == r.Body.Id))
+            .OfType<BodyInfo>()
+            .ToList();
+        var gone = entry.Rows
+            .Where(r => present.All(b => b.Id != r.Body.Id))
+            .Select(r => UiText.Reasons.BodyLine(r.Body.Name, UiText.Reasons.NoLongerInPart))
+            .ToList();
+        return (present, gone);
+    }
+
+    /// <summary>A body Apply could not change, as it stays in the pending tree.</summary>
     private static PendingBodyRow NotApplied(PendingBodyRow row, string reason) =>
         row with { Status = PendingBodyStatus.Blocked, Message = reason };
 
     // ---- Pending list ----
 
-    private void ReplacePending(IEnumerable<PendingAssignmentEntry> entries)
+    /// <summary>The entry each pending body is claimed by.</summary>
+    private Dictionary<BodyId, PendingEntry> ClaimsByBody()
+    {
+        var claims = new Dictionary<BodyId, PendingEntry>();
+        foreach (var entry in _pending)
+        {
+            foreach (var row in entry.Rows)
+                claims[row.Body.Id] = entry;
+        }
+
+        return claims;
+    }
+
+    private void ReplacePending(IEnumerable<PendingEntry> entries)
     {
         var list = entries.ToList();
         _pending.Clear();
@@ -890,7 +928,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
 
     /// <summary><paramref name="entries"/> with <paramref name="bodyIds"/> taken out, dropping any entry left with
     /// no body. Not re-planned: Apply re-plans against the part as it then stands.</summary>
-    private static List<PendingAssignmentEntry> WithoutBodies(IEnumerable<PendingAssignmentEntry> entries, IReadOnlyCollection<BodyId> bodyIds) =>
+    private static List<PendingEntry> WithoutBodies(IEnumerable<PendingEntry> entries, IReadOnlyCollection<BodyId> bodyIds) =>
         entries
             .Select(e => e with { Rows = e.Rows.Where(r => !bodyIds.Contains(r.Body.Id)).ToList() })
             .Where(e => e.Rows.Count > 0)
@@ -908,18 +946,18 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     public IReadOnlyList<TreeMenuItem> BuildAssignmentMenu(AssignmentRowRef? clicked)
     {
         if (clicked is null)
-            return new[] { new TreeMenuItem(AssignmentMenu.Refresh, "Refresh") };
+            return new[] { new TreeMenuItem(AssignmentMenu.Refresh, UiText.Menu.Refresh) };
 
-        var isUnassigned = clicked.Row.IsUnassignedBucket;
         var hasSolidBody = clicked.Bodies.Any(SheetMetalBodies.IsSolid);
+        var hasMaterial = clicked.Bodies.Any(b => SheetMetalBodies.MaterialOf(b.Id, _currentAssignments) is not null);
 
         return new[]
         {
-            new TreeMenuItem(AssignmentMenu.SelectBodies, "Select these bodies"),
-            new TreeMenuItem(AssignmentMenu.AddToBodySelection, "Add all to body selection", hasSolidBody),
-            new TreeMenuItem(AssignmentMenu.RemoveMaterial, "Remove material", !isUnassigned),
+            new TreeMenuItem(AssignmentMenu.SelectBodies, UiText.Menu.SelectBodies),
+            new TreeMenuItem(AssignmentMenu.AddToBodySelection, UiText.Menu.AddToBodySelection, hasSolidBody),
+            new TreeMenuItem(AssignmentMenu.RemoveMaterial, UiText.Menu.RemoveMaterial, hasMaterial),
             TreeMenuItem.Separator,
-            new TreeMenuItem(AssignmentMenu.Refresh, "Refresh"),
+            new TreeMenuItem(AssignmentMenu.Refresh, UiText.Menu.Refresh),
         };
     }
 
@@ -939,7 +977,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
                 AddSolidBodiesToSelection(targets.SelectMany(t => t.Bodies));
                 return;
             case AssignmentMenu.RemoveMaterial:
-                RemoveMaterialFrom(bodyIds);
+                StageRemoval(bodyIds);
                 return;
         }
     }
@@ -952,7 +990,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         var solidIds = bodies.Where(SheetMetalBodies.IsSolid).Select(b => b.Id).ToList();
         if (solidIds.Count == 0)
         {
-            _blocks.ShowError("None of the selected rows have a solid body.");
+            _blocks.ShowError(UiText.Errors.NoSolidBodyInRows);
             return;
         }
 
@@ -961,30 +999,11 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         _blocks.SetSelectedBodies(current.ToList());
     }
 
-    private void RemoveMaterialFrom(IReadOnlyList<BodyId> bodyIds)
-    {
-        if (bodyIds.Count == 0)
-        {
-            _blocks.ShowError("Select at least one body to remove its material.");
-            return;
-        }
-
-        // Pending entries do not mind: Apply re-plans them against whatever the bodies have then.
-        if (!_blocks.Confirm($"Clear the physical and display material from {bodyIds.Count} body(ies)?"))
-            return;
-
-        var result = _partMaterialService.ClearMaterial(bodyIds);
-        _blocks.ShowResult(result, $"Material cleared from {bodyIds.Count} body(ies).");
-
-        RecordApplied(result, $"Material cleared from {bodyIds.Count} body(ies)");
-        OnRefreshClicked();
-    }
-
     // ---- Pending tree menu ----
 
     public IReadOnlyList<TreeMenuItem> BuildPendingMenu(PendingRowRef? clicked)
     {
-        var clearAll = new TreeMenuItem(PendingMenu.ClearAll, "Clear all pending", _pending.Count > 0);
+        var clearAll = new TreeMenuItem(PendingMenu.ClearAll, UiText.Menu.ClearAllPending, _pending.Count > 0);
 
         if (clicked is null)
             return new[] { clearAll };
@@ -992,7 +1011,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         // Nothing is committed from here: Apply/OK apply the whole pending list at once.
         return new[]
         {
-            new TreeMenuItem(PendingMenu.Remove, "Remove from pending"),
+            new TreeMenuItem(PendingMenu.Remove, UiText.Menu.RemoveFromPending),
             TreeMenuItem.Separator,
             clearAll,
         };
@@ -1021,7 +1040,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         RenderPending();
     }
 
-    // ---- Planning and committing ----
+    // ---- Planning ----
 
     /// <summary>The bodies in the selection block, or null — after saying why — when there are none.</summary>
     private IReadOnlyList<BodyInfo>? SelectedTargets()
@@ -1029,7 +1048,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         var selectedIds = _blocks.GetSelectedBodyIds();
         if (selectedIds.Count == 0)
         {
-            _blocks.ShowError("Select at least one body before assigning a material.");
+            _blocks.ShowError(UiText.Errors.SelectBodiesFirst);
             return null;
         }
 
@@ -1038,7 +1057,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         if (targets.Count == 0)
         {
             // The selection resolved to nothing this scan knows about — the part changed under the dialog.
-            _blocks.ShowError("The selected bodies are no longer in the work part. Refresh and try again.");
+            _blocks.ShowError(UiText.Errors.SelectionNotInPart);
             return null;
         }
 
@@ -1056,11 +1075,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         if (pick.Row is null
             && entry.Rows.Any(r => r.Body.Kind == BodyKind.SheetMetal && r.Status != PendingBodyStatus.Blocked))
         {
-            _blocks.ShowError(
-                $"Sheet metal bodies need a sheet metal material, not just '{pick.Material.Name}'.{Environment.NewLine}{Environment.NewLine}" +
-                $"Expand '{pick.Material.Name}' in the material tree and pick one of its rows (Standard, thickness, bend " +
-                "radius) — that is what the part's Sheet Metal Preferences are set to. Use the Sheet Metal Preferences " +
-                "filters to narrow the rows.");
+            _blocks.ShowError(UiText.Errors.SheetMetalNeedsRow(pick.Material.Name));
             return null;
         }
 
@@ -1073,8 +1088,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         return entry;
     }
 
-    /// <summary>See <see cref="SheetMetalConflictFinder.Find"/>. A pending body counts as its pending entry's material
-    /// and row, since that is what it will have.</summary>
+    /// <summary>See <see cref="SheetMetalConflictFinder.Find"/>. A body pending an assignment counts as that entry's
+    /// material and row, and one pending removal as having none, since that is what each will have.</summary>
     private string? FindSheetMetalConflict(Material material, SheetMetalMaterialRow? row, IReadOnlyList<BodyInfo> targets) =>
         SheetMetalConflictFinder.Find(material, row, targets, _allBodies, _currentAssignments, _pending, () => _partPreference?.Row);
 
@@ -1100,11 +1115,8 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
         if (needing.Count == 0)
             return new HashSet<BodyId>();
 
-        var details = needing.Select(r => $"  [{r.Body.Name}] {r.Message}");
-        var message =
-            $"{needing.Count} body(ies) need confirmation for {entry.Material.Name}:{Environment.NewLine}" +
-            string.Join(Environment.NewLine, details) +
-            $"{Environment.NewLine}{Environment.NewLine}Apply to all of them?";
+        var message = UiText.Confirm.ConfirmBodies(
+            needing.Count, entry.Material.Name, needing.Select(r => UiText.Reasons.BodyLine(r.Body.Name, r.Message ?? string.Empty)));
 
         return _blocks.Confirm(message)
             ? needing.Select(r => r.Body.Id).ToHashSet()
@@ -1115,7 +1127,7 @@ public sealed class MaterialAssignmentDialogPresenter : ITreeInteractionSink
     {
         if (_propertyWindow is null)
         {
-            _blocks.ShowError("The material property window is not available.");
+            _blocks.ShowError(UiText.Errors.PropertyWindowUnavailable);
             return;
         }
 
