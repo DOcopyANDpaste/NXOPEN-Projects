@@ -44,6 +44,7 @@ public sealed class TreeBinding<T> where T : class
             {
                 Clear();
                 populate();
+                ExpandRoots();
             }
             finally
             {
@@ -58,6 +59,17 @@ public sealed class TreeBinding<T> where T : class
         finally
         {
             IsRebuilding = false;
+        }
+    }
+
+    /// <summary>Every tree opens to level 1: each top-level row is expanded, so its direct children show without a
+    /// click. Done after every rebuild, since a rebuilt tree starts collapsed.</summary>
+    private void ExpandRoots()
+    {
+        for (var node = _tree.RootNode; node is not null; node = node.NextSiblingNode)
+        {
+            if (node.FirstChildNode is not null)
+                node.Expand(Node.ExpandOption.Expand);
         }
     }
 

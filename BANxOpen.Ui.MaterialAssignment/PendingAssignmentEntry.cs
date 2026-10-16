@@ -19,15 +19,15 @@ public enum PendingBodyStatus
 
 public sealed record PendingBodyRow(BodyInfo Body, PendingBodyStatus Status, string? Message);
 
-/// <summary>One previewed "assign this material to these bodies" request: already applied to the part on top of
-/// the dialog's preview undo mark, and kept or reverted as a whole by OK/Apply or Cancel. Presentation-only, like
-/// <see cref="MaterialUsageRow"/> — it carries the Core types a re-apply needs (<see cref="Input"/> and
-/// <see cref="Plan"/> go straight to <c>IAssignmentPlanFinalizer.Finalize</c>) plus the per-body rows the pending
-/// tree renders.
+/// <summary>One staged "assign this material to these bodies" request. Nothing is applied to the part until
+/// OK/Apply; Cancel simply discards it. Presentation-only, like <see cref="MaterialUsageRow"/> — it carries the Core
+/// types an apply needs (<see cref="Input"/> and <see cref="Plan"/> go straight to
+/// <c>IAssignmentPlanFinalizer.Finalize</c>) plus the per-body rows the pending tree renders.
 ///
-/// Only bodies that were actually applied are kept in an entry; blocked and declined bodies are reported to the user
-/// when the material is assigned and left out. When the preview is rebuilt (a pending body removed or reclaimed), the
-/// entry is re-planned and re-applied with the confirmations in <see cref="ConfirmedBodyIds"/>.</summary>
+/// Only bodies that will be assigned are staged; blocked and declined bodies are reported to the user when the
+/// material is added and left out. Apply re-plans the entry against the part as it then stands, reusing the
+/// confirmations in <see cref="ConfirmedBodyIds"/>. A body Apply could not assign stays in the entry with
+/// <see cref="PendingBodyStatus.Blocked"/> and the reason as its message.</summary>
 public sealed record PendingAssignmentEntry(
     Material Material,
     MaterialAssignmentPlanningInput Input,

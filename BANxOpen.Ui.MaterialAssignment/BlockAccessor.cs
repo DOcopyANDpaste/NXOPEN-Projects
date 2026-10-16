@@ -94,8 +94,11 @@ public sealed class BlockAccessor
         public const int Count = 1;
         public const int DisplayMaterial = 2;
 
+        // What a body is about to be changed to — see PendingByBody.
+        public const int Pending = 3;
+
         // Only inserted in the NX Sheet Metal application — see ShowSheetMetalGradeColumn.
-        public const int SheetMetalGrade = 3;
+        public const int SheetMetalGrade = 4;
     }
 
     private static class PendingColumn
@@ -165,7 +168,7 @@ public sealed class BlockAccessor
     }
 
     private readonly NodeState _materialNodeState = new("material", columnCount: 3);
-    private readonly NodeState _currentAssignmentNodeState = new("currentAssignment", columnCount: 3);
+    private readonly NodeState _currentAssignmentNodeState = new("currentAssignment", columnCount: 4);
     private readonly NodeState _pendingNodeState = new("pending", columnCount: 3);
 
     /// <summary>One Sheet Metal Preferences filter dropdown and the values it was last filled with, after the
@@ -368,13 +371,14 @@ public sealed class BlockAccessor
                 break;
 
             case CurrentAssignmentNode:
-                _currentAssignmentNodeState.ColumnCount = ShowSheetMetalGradeColumn ? 4 : 3;
+                _currentAssignmentNodeState.ColumnCount = ShowSheetMetalGradeColumn ? 5 : 4;
                 EnsureNodeColumns(_currentAssignmentNodeState, () =>
                 {
                     InsertColumns(_currentAssignmentTree,
                         (AssignmentColumn.Name, "Material / Body", 220),
                         (AssignmentColumn.Count, "Bodies / Kind", 110),
-                        (AssignmentColumn.DisplayMaterial, "Display material", 140));
+                        (AssignmentColumn.DisplayMaterial, "Display material", 140),
+                        (AssignmentColumn.Pending, "Pending", 200));
                     if (ShowSheetMetalGradeColumn)
                         InsertColumns(_currentAssignmentTree, (AssignmentColumn.SheetMetalGrade, "SheetMetal Grade", 150));
                 });
@@ -723,6 +727,9 @@ public sealed class BlockAccessor
                 {
                     var node = _assignments.Add(group.Row.MaterialLabel, group, parent: null);
                     node.SetColumnDisplayText(AssignmentColumn.Count, group.Row.BodyCount.ToString());
+                    var pendingCount = group.Bodies.Count(b => PendingByBody.ContainsKey(b.Id));
+                    if (pendingCount > 0)
+                        node.SetColumnDisplayText(AssignmentColumn.Pending, $"{pendingCount} pending");
                     if (ShowSheetMetalGradeColumn)
                         node.SetColumnDisplayText(AssignmentColumn.SheetMetalGrade, SheetMetalGradeText.ForMaterial(group.Row.MaterialLabel, PartPreference));
 
@@ -731,6 +738,8 @@ public sealed class BlockAccessor
                         var bodyNode = _assignments.Add(body.Name, AssignmentRowRef.ForBody(group.Row, body), node);
                         bodyNode.SetColumnDisplayText(AssignmentColumn.Count, body.Kind.ToString());
                         bodyNode.SetColumnDisplayText(AssignmentColumn.DisplayMaterial, DisplayMaterialText(body));
+                        if (PendingByBody.TryGetValue(body.Id, out var pending))
+                            bodyNode.SetColumnDisplayText(AssignmentColumn.Pending, PendingFlagText(pending));
                         if (ShowSheetMetalGradeColumn)
                             bodyNode.SetColumnDisplayText(AssignmentColumn.SheetMetalGrade, SheetMetalGradeText.ForBody(
                                 PreferenceChecks.TryGetValue(body.Id, out var check) ? check : null, PartPreference));
@@ -757,6 +766,24 @@ public sealed class BlockAccessor
     public IReadOnlyDictionary<BodyId, SheetMetalPreferenceCheckResult> PreferenceChecks { get; set; } =
         new Dictionary<BodyId, SheetMetalPreferenceCheckResult>();
 
+    /// <summary>Each pending body with the entry that claims it, for the current-assignment tree's Pending column. Set by
+    /// the presenter alongside <see cref="CurrentAssignments"/>, so the part's real materials and what is about to
+    /// change them are shown side by side.</summary>
+    public IReadOnlyDictionary<BodyId, PendingRowRef> PendingByBody { get; set; } =
+        new Dictionary<BodyId, PendingRowRef>();
+
+    private static string PendingFlagText(PendingRowRef pending)
+    {
+        var row = pending.Row!;
+        var suffix = row.Status == PendingBodyStatus.Blocked ? " (not applied)"
+            : IsConfirmed(pending.Entry, row) ? " (confirmed)"
+            : string.Empty;
+        return $"→ {pending.Entry.DisplayName}{suffix}";
+    }
+
+    private static bool IsConfirmed(PendingAssignmentEntry entry, PendingBodyRow row) =>
+        row.Status == PendingBodyStatus.NeedsConfirmation && entry.ConfirmedBodyIds.Contains(row.Body.Id);
+
     private string DisplayMaterialText(BodyInfo body) =>
         CurrentAssignments.TryGetValue(body.Id, out var assignment)
             ? assignment.CurrentDisplayMaterial?.Name ?? string.Empty
@@ -781,17 +808,23 @@ public sealed class BlockAccessor
                     {
                         var bodyNode = _pending.Add(row.Body.Name, new PendingRowRef(entry, row), node);
                         bodyNode.SetColumnDisplayText(PendingColumn.Kind, row.Body.Kind.ToString());
-                        bodyNode.SetColumnDisplayText(PendingColumn.Status, StatusText(row));
+                        bodyNode.SetColumnDisplayText(PendingColumn.Status, StatusText(entry, row));
                     }
                 }
             }));
     }
 
-    /// <summary>Every body in the pending tree has been applied as a preview — blocked and declined bodies are
-    /// reported when the material is assigned and never listed — so the status only adds a rule's warning or
-    /// confirmation note.</summary>
-    private static string StatusText(PendingBodyRow row) =>
-        string.IsNullOrWhiteSpace(row.Message) ? "Previewed" : $"Previewed — {row.Message}";
+    /// <summary>Nothing in the pending tree has touched the part yet. Blocked and declined bodies are reported when the
+    /// material is added and never listed, so a body is either waiting — with a rule's warning or the reassignment the
+    /// user confirmed — or was left behind by Apply, with why.</summary>
+    private static string StatusText(PendingAssignmentEntry entry, PendingBodyRow row)
+    {
+        if (row.Status == PendingBodyStatus.Blocked)
+            return $"Not applied — {row.Message ?? "unknown reason"}";
+
+        var status = IsConfirmed(entry, row) ? "Pending — confirmed" : "Pending";
+        return string.IsNullOrWhiteSpace(row.Message) ? status : $"{status}: {row.Message}";
+    }
 
     // ---- Tree selection highlight ----
 
